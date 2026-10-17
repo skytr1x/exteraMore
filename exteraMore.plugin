@@ -1,0 +1,4135 @@
+__id__ = "extera_more"
+__name__ = "exteraMore"
+__description__ = "Faster plugin loading, a permission system and a code viewer for Elyx archives.\n\nThe permission idea comes from the exteraless client."
+__author__ = "@sktrxdev"
+__version__ = "3.1"
+__icon__ = "exteraGram/0"
+__app_version__ = ">=12.10.6"
+
+import ast
+import base64
+import builtins
+import contextvars
+import dis
+import functools
+import hashlib
+import importlib
+import importlib.abc
+import importlib.util
+import io
+import json
+import marshal
+import os
+import re
+import shutil
+import socket
+import sys
+import tempfile
+import threading
+import time
+import traceback
+import types
+import zipfile
+
+from base_plugin import AppEvent, BasePlugin
+from ui.settings import Custom, Divider, Header, Input, Switch, Text
+
+TEXTS = {
+    "en": {
+        "perf": "Performance",
+        "cache_imports": "Import cache",
+        "lazy_imports": "Lazy imports",
+        "lazy_modules": "Lazy modules",
+        "compat_force": "Ignore client version check",
+        "sec": "Plugin security",
+        "perm_on": "Permission system",
+        "trust_off": "Replace trusted system",
+        "strict": "Ask about new plugins",
+        "pending": "Waiting for your decision",
+        "none": "no permissions",
+        "plugins_over": "Plugins",
+        "plugins_none": "No other plugins installed",
+        "perms_of": "%d of %d permissions",
+        "close": "Close",
+        "allow": "Allow",
+        "deny": "Deny",
+        "req_title": "Permission request",
+        "sheet_title": "Plugin permissions",
+        "req_msg": "%s asks for:\n%s",
+        "req_danger": "\n\n⚠ Full control over the client (hooks and native code).",
+        "denied": "%s: «%s» denied",
+        "perms_tab": "Permissions",
+        "perms_count": "%d of %d",
+        "perm.ui": "Interface",
+        "perm.messages.read": "Read messages and updates",
+        "perm.messages.send": "Send, edit and delete messages",
+        "perm.network": "Network access",
+        "perm.files": "Files outside its own folder",
+        "perm.intents": "Links and other apps",
+        "perm.settings": "Settings of the app and other plugins",
+        "perm.hooks": "Java hooks (full control)",
+        "perm.native": "Native libraries (full control)",
+        "permd.messages.read": "Sees incoming messages and updates",
+        "permd.messages.send": "Sends, edits and deletes messages as you",
+        "permd.network": "Connects to the internet",
+        "permd.files": "Reads and writes files outside its own folder",
+        "permd.intents": "Opens links and other apps",
+        "permd.settings": "Reads and changes settings of the app and other plugins",
+        "permd.hooks": "Changes how the app works. Grant only to plugins you trust",
+        "permd.native": "Runs native code. Grant only to plugins you trust",
+        "hide_trust": "Hide the source badge",
+        "perm_hint": "Tap a row to allow or deny it. You can change this later in exteraMore.",
+        "perm_none_s": "This plugin asks for nothing special",
+        "scan_incomplete": "Source scan was limited",
+        "scan_incomplete_detail": "All permissions are shown for safety. Review them before granting.",
+        "scan_incomplete_request": "\n\n⚠ The source scan was limited, so all permissions are listed.",
+        "hdr_desc": "Faster plugins, permissions and a code viewer.",
+        "support": "Support",
+        "support_title": "Support the author",
+        "support_sub": "Thanks for using my plugins. If they are useful to you, let me know.",
+        "support_p1": "Your support pushes me to build better and bigger plugins",
+        "support_p2": "Any support helps, from a gift to a reaction on the channel",
+        "support_go": "Open channel",
+        "code_viewer": "Code viewer",
+        "code_viewer_sub": "Open any installed plugin in the file browser",
+        "code_none": "Nothing to show yet",
+        "view_code": "View code",
+        "kind_elyx": "Elyx archive",
+        "kind_single": "Single file",
+        "ide_files": "Files",
+        "ide_copy": "Copy",
+        "ide_copied": "Code copied",
+        "ide_pick": "Pick a file in the tree",
+        "ide_loading": "Reading…",
+        "ide_failed": "Cannot open this plugin: %s",
+        "ide_binary": "Binary file, %s",
+        "ide_cut": "Showing the first %s of %s",
+        "ide_lines": "%d lines",
+        "ide_empty": "Empty folder",
+        "ide_pyc_note": "Recovered from bytecode. Names, constants and instructions are exact, the control flow is not rebuilt.",
+        "ide_pyc_broken": "The bytecode does not match this Python version. Showing the strings found in the file.",
+        "ide_locked": "Review only, copying is off",
+        "ide_audit": "Source hidden by the author",
+        "prot_review": "review only",
+        "prot_audit": "audit report only",
+        "audit_title": "Audit report: %s",
+        "audit_size": "%d lines, %d functions, %d classes",
+        "audit_imports": "Imports",
+        "audit_perms": "Where permissions are used (line, permission, API)",
+        "audit_calls": "Dynamic code and system calls",
+        "audit_urls": "Web addresses (query strings removed)",
+        "audit_defs": "Functions and classes",
+        "audit_none": "nothing found",
+        "audit_more": "... and %d more",
+        "audit_pyc": "Compiled file. Only names and web addresses are listed.",
+        "audit_bad": "The bytecode does not match this Python version.",
+    },
+    "ru": {
+        "perf": "Производительность",
+        "cache_imports": "Кеш импортов",
+        "lazy_imports": "Ленивые импорты",
+        "lazy_modules": "Ленивые модули",
+        "compat_force": "Игнорировать проверку версии клиента",
+        "sec": "Безопасность плагинов",
+        "perm_on": "Система разрешений",
+        "trust_off": "Заменить систему доверия",
+        "strict": "Спрашивать про новые плагины",
+        "pending": "Ждёт вашего решения",
+        "none": "нет разрешений",
+        "plugins_over": "Плагины",
+        "plugins_none": "Других плагинов нет",
+        "perms_of": "%d из %d разрешений",
+        "close": "Закрыть",
+        "allow": "Разрешить",
+        "deny": "Запретить",
+        "req_title": "Запрос разрешений",
+        "sheet_title": "Разрешения плагина",
+        "req_msg": "%s просит:\n%s",
+        "req_danger": "\n\n⚠ Полный контроль над клиентом (хуки и нативный код).",
+        "denied": "%s: «%s» запрещено",
+        "perms_tab": "Разрешения",
+        "perms_count": "%d из %d",
+        "perm.ui": "Интерфейс",
+        "perm.messages.read": "Чтение сообщений и обновлений",
+        "perm.messages.send": "Отправка, правка и удаление сообщений",
+        "perm.network": "Доступ к сети",
+        "perm.files": "Файлы вне своей папки",
+        "perm.intents": "Ссылки и другие приложения",
+        "perm.settings": "Настройки приложения и других плагинов",
+        "perm.hooks": "Java-хуки (полный контроль)",
+        "perm.native": "Нативные библиотеки (полный контроль)",
+        "permd.messages.read": "Видит входящие сообщения и обновления",
+        "permd.messages.send": "Отправляет, правит и удаляет сообщения от вашего имени",
+        "permd.network": "Выходит в интернет",
+        "permd.files": "Читает и пишет файлы вне своей папки",
+        "permd.intents": "Открывает ссылки и другие приложения",
+        "permd.settings": "Читает и меняет настройки приложения и других плагинов",
+        "permd.hooks": "Меняет работу приложения. Давайте только тем, кому доверяете",
+        "permd.native": "Запускает нативный код. Давайте только тем, кому доверяете",
+        "hide_trust": "Скрывать плашку источника",
+        "perm_hint": "Нажмите на строку, чтобы разрешить или запретить. Позже это можно изменить в exteraMore.",
+        "perm_none_s": "Плагин не просит ничего особенного",
+        "scan_incomplete": "Исходник проверен не полностью",
+        "scan_incomplete_detail": "Для безопасности показаны все разрешения. Проверьте их перед выдачей.",
+        "scan_incomplete_request": "\n\n⚠ Проверена только часть исходника, поэтому показаны все разрешения.",
+        "hdr_desc": "Быстрые плагины, разрешения и просмотр кода.",
+        "support": "Поддержать",
+        "support_title": "Поддержать автора",
+        "support_sub": "Спасибо, что пользуетесь моими плагинами. Если они вам полезны, дайте знать.",
+        "support_p1": "Ваша поддержка помогает мне делать плагины лучше и сложнее",
+        "support_p2": "Любая помощь важна, от подарка до реакции на канале",
+        "support_go": "Открыть канал",
+        "code_viewer": "Просмотр кода",
+        "code_viewer_sub": "Открыть любой установленный плагин в файловом браузере",
+        "code_none": "Пока нечего показывать",
+        "view_code": "Посмотреть код",
+        "kind_elyx": "Архив Elyx",
+        "kind_single": "Один файл",
+        "ide_files": "Файлы",
+        "ide_copy": "Копировать",
+        "ide_copied": "Код скопирован",
+        "ide_pick": "Выберите файл в дереве",
+        "ide_loading": "Читаю…",
+        "ide_failed": "Не удалось открыть плагин: %s",
+        "ide_binary": "Бинарный файл, %s",
+        "ide_cut": "Показано %s из %s",
+        "ide_lines": "строк: %d",
+        "ide_empty": "Пустая папка",
+        "ide_pyc_note": "Восстановлено из байткода. Имена, константы и инструкции точные, поток управления не собран.",
+        "ide_pyc_broken": "Байткод не подходит этой версии Python. Показаны строки, найденные в файле.",
+        "ide_locked": "Только просмотр, копирование выключено",
+        "ide_audit": "Исходник скрыт автором",
+        "prot_review": "только просмотр",
+        "prot_audit": "только отчёт аудита",
+        "audit_title": "Отчёт аудита: %s",
+        "audit_size": "строк: %d, функций: %d, классов: %d",
+        "audit_imports": "Импорты",
+        "audit_perms": "Где используются разрешения (строка, разрешение, API)",
+        "audit_calls": "Динамический код и системные вызовы",
+        "audit_urls": "Веб-адреса (без параметров запроса)",
+        "audit_defs": "Функции и классы",
+        "audit_none": "ничего не найдено",
+        "audit_more": "... и ещё %d",
+        "audit_pyc": "Скомпилированный файл. Показаны только имена и веб-адреса.",
+        "audit_bad": "Байткод не подходит этой версии Python.",
+    },
+}
+
+lang_cache = [None, -1e9]
+
+
+def lang():
+    now = time.monotonic()
+    if lang_cache[0] is not None and now - lang_cache[1] < 10.0:
+        return lang_cache[0]
+    try:
+        from org.telegram.messenger import LocaleController
+        code = str(LocaleController.getInstance().getCurrentLocale().getLanguage()).lower()
+    except Exception:
+        try:
+            from java.util import Locale
+            code = str(Locale.getDefault().getLanguage()).lower()
+        except Exception:
+            code = "en"
+    lang_cache[0] = "ru" if code.startswith("ru") else "en"
+    lang_cache[1] = now
+    return lang_cache[0]
+
+
+def tr(key, *args):
+    text = TEXTS[lang()].get(key) or TEXTS["en"].get(key, key)
+    return text % args if args else text
+
+PERMS = ("messages.read", "messages.send", "network", "files",
+         "intents", "settings", "hooks", "native")
+DANGEROUS = frozenset(("hooks", "native"))
+
+MARKERS = (
+    ("import requests", "network"), ("urllib.request", "network"), ("http.client", "network"),
+    ("import socket", "network"), ("websocket", "network"), ("java.net", "network"),
+    ("HttpURLConnection", "network"), ("OkHttpClient", "network"), ("aiohttp", "network"),
+    ("on_update_hook", "messages.read"), ("on_updates_hook", "messages.read"),
+    ("pre_request_hook", "messages.read"), ("post_request_hook", "messages.read"),
+    ("add_hook(", "messages.read"), ("send_request(", "messages.read"),
+    ("MessagesStorage", "messages.read"), ("queryFinalized", "messages.read"),
+    ("send_message(", "messages.send"), ("send_text(", "messages.send"),
+    ("send_photo(", "messages.send"), ("send_document(", "messages.send"),
+    ("send_video(", "messages.send"), ("send_audio(", "messages.send"),
+    ("edit_message(", "messages.send"), ("on_send_message_hook", "messages.send"),
+    ("SendMessagesHelper", "messages.send"), ("TL_messages_send", "messages.send"),
+    ("TL_messages_edit", "messages.send"), ("TL_messages_delete", "messages.send"),
+    ("shutil", "files"), ("os.remove", "files"), ("os.listdir", "files"), ("os.rename", "files"),
+    ("java.io.File", "files"), ("FileOutputStream", "files"), ("MediaStore", "files"),
+    ("add_file_hook", "files"), ("sqlite3", "files"),
+    ("add_intent_hook", "intents"), ("startActivity", "intents"), ("android.content.Intent", "intents"),
+    ("SharedConfig", "settings"), ("ExteraConfig", "settings"), ("NekoConfig", "settings"),
+    ("plugin_settings", "settings"), ("getSharedPreferences", "settings"),
+    ("hook_method", "hooks"), ("hook_all_methods", "hooks"), ("hook_all_constructors", "hooks"),
+    ("MethodHook", "hooks"), ("MethodReplacement", "hooks"), ("XposedBridge", "hooks"),
+    ("DexClassLoader", "hooks"), ("InMemoryDexClassLoader", "hooks"),
+    ("import ctypes", "native"), ("CDLL(", "native"), ("loadLibrary", "native"),
+)
+RE_OPEN = re.compile(r"(?<![\w.])open\(")
+
+MARKERS_BY_PERM = {}
+for marker, perm in MARKERS:
+    MARKERS_BY_PERM.setdefault(perm, []).append(marker)
+MARKERS_BY_PERM = {perm: tuple(marks) for perm, marks in MARKERS_BY_PERM.items()}
+SCAN_VERSION = hashlib.sha1(
+    repr((MARKERS, PERMS, "open-re", "elyx", "protect", "bounded-source-v2")).encode()
+).hexdigest()[:8]
+
+META_KEYS = ("__id__", "__name__", "__version__", "__permissions__")
+
+RE_TOPLEVEL = re.compile(r"^(?:def |class |async def |@)", re.M)
+RE_FROM_IMPORT = re.compile(r"^from\s+([A-Za-z_]\w*)[\w.]*\s+import\b", re.M)
+RE_IMPORT = re.compile(r"^import\s+([^#\n]+)", re.M)
+RE_YAML_ID = re.compile(
+    r"^\s*[\"']?id[\"']?\s*:\s*[\"']?([\w.-]+)",
+    re.M,
+)
+RE_YAML_NAME = re.compile(
+    r"^\s*[\"']?name[\"']?\s*:\s*[\"']?([^\"'\n]+)",
+    re.M,
+)
+
+ARCHIVE_EXT = (".elyx", ".eaf", ".elyx.zip", ".eaf.zip")
+PLUGIN_EXT = (".plugin", ".py")
+REFMAP_NAMES = ("refmap.yml", "refmap.yaml", "refmap.json")
+META_NAMES = ("metainfo.yml", "metainfo.yaml", "metainfo.json")
+PROTECT_LEVELS = ("open", "review", "audit")
+RE_PROTECT = re.compile(
+    r"(?:^|[{,])\s*[\"']?protect(?:ion)?[\"']?\s*:\s*[\"']?([A-Za-z]+)",
+    re.M | re.I,
+)
+SOURCE_CAP = 1500000
+
+
+class PluginState:
+    plugin = None
+    on = False
+    alive = False
+    lock = threading.RLock()
+    scan_lock = threading.RLock()
+
+    grants = {}
+    pending = set()
+    prompted = set()
+    denied = {}
+    provisional = set()
+    cleanup_timer = None
+
+    scan_cache = {}
+    scan_all = {}
+    last_scan = 0.0
+    scan_loaded = False
+    scan_dirty = False
+    scan_refreshing = False
+    plugin_infos = {}
+
+    gate_patches = []
+    unhooks = []
+    ctx_patches = []
+    settings_patches = []
+    settings_init = None
+    settings_scanned = False
+    self_cls = None
+
+    lazy_finder = None
+    old_pyc_prefix = None
+    old_dont_write = None
+
+    install_args = []
+    install_seen_at = 0.0
+    gated = set()
+    started = set()
+    injected = {}
+    sheet_paths = {}
+    dex_bridge = None
+    dex_loader = None
+    dex_provider = None
+    dex_permissions = {}
+
+    support_chat = None
+    ide = None
+
+STATE = PluginState
+
+
+def log(level, msg):
+    plugin = STATE.plugin
+    try:
+        getattr(plugin.logger, level)("%s", msg)
+    except Exception:
+        try:
+            plugin.log("[%s] %s" % (level, msg))
+        except Exception:
+            pass
+
+
+def cfg(key, default=None):
+    try:
+        return STATE.plugin.get_setting(key, default)
+    except Exception:
+        return default
+
+
+def hook_method(member, before=None, after=None):
+    if not STATE.alive:
+        return None
+    kwargs = {}
+    if before is not None:
+        kwargs["before"] = before
+    if after is not None:
+        kwargs["after"] = after
+    try:
+        if member.getModifiers() & 0x400:
+            return None
+    except Exception:
+        pass
+    member.setAccessible(True)
+    unhook = STATE.plugin.hook_method(member, **kwargs)
+    if unhook:
+        with STATE.lock:
+            STATE.unhooks.append(unhook)
+    return unhook
+
+
+def safe(fn):
+    try:
+        fn()
+    except Exception:
+        pass
+
+
+def on_ui(fn):
+    try:
+        from android_utils import run_on_ui_thread
+        run_on_ui_thread(fn)
+    except Exception:
+        fn()
+
+
+def later(fn, ms):
+    from android_utils import run_on_ui_thread
+    run_on_ui_thread(fn, ms)
+
+dirs = {}
+
+
+def dir(kind, fallback):
+    if kind not in dirs:
+        try:
+            import file_utils
+            dirs[kind] = os.path.abspath(getattr(file_utils, "get_%s_dir" % kind)())
+        except Exception:
+            dirs[kind] = fallback
+    return dirs[kind]
+
+
+def plugins_dir():
+    return dir("plugins", "")
+
+
+def cache_dir():
+    return dir("cache", tempfile.gettempdir())
+
+
+def plugins_prefix():
+    root = plugins_dir()
+    return root.rstrip(os.sep) + os.sep if root else ""
+
+
+def pid_from_file(filename):
+    prefix = plugins_prefix()
+    if not prefix or not isinstance(filename, str) or not filename.startswith(prefix):
+        return None
+    parts = filename[len(prefix):].split(os.sep)
+    return parts[0] if len(parts) > 1 and parts[0] else None
+
+
+def scan_cache_path():
+    return os.path.join(cache_dir(), "extera_more", "scan.json")
+
+
+def load_scan_cache():
+    if STATE.scan_loaded:
+        return
+    STATE.scan_loaded = True
+    try:
+        with open(scan_cache_path(), "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+        if raw.get("v") != SCAN_VERSION:
+            return
+        for path, row in raw.get("files", {}).items():
+            STATE.scan_cache.setdefault(path, (tuple(row[0]), row[1]))
+    except Exception:
+        pass
+
+
+def save_scan_cache():
+    if not STATE.scan_dirty:
+        return
+    STATE.scan_dirty = False
+    try:
+        path = scan_cache_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        root = plugins_dir()
+        files = {p: [list(k), i] for p, (k, i) in list(STATE.scan_cache.items())
+                 if os.path.dirname(p) == root}
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"v": SCAN_VERSION, "files": files}, fh, separators=(",", ":"))
+        os.replace(tmp, path)
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def meta_of(tree):
+    meta = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and node.targets[0].id in META_KEYS):
+            try:
+                meta[node.targets[0].id] = ast.literal_eval(node.value)
+            except Exception:
+                pass
+    return meta
+
+
+def read_meta(src):
+    match = RE_TOPLEVEL.search(src)
+    if match:
+        try:
+            meta = meta_of(ast.parse(src[:match.start()]))
+            if "__id__" in meta:
+                return meta
+        except Exception:
+            pass
+    try:
+        return meta_of(ast.parse(src))
+    except Exception:
+        return None
+
+
+def imports_of(src):
+    found = set(m.group(1) for m in RE_FROM_IMPORT.finditer(src))
+    for match in RE_IMPORT.finditer(src):
+        for part in match.group(1).split(","):
+            name = part.strip().split(" ")[0].split(".")[0]
+            if name and name.isidentifier():
+                found.add(name)
+    return found
+
+
+def perms_in(src):
+    found = {perm for perm, marks in MARKERS_BY_PERM.items() if any(m in src for m in marks)}
+    if RE_OPEN.search(src):
+        found.add("files")
+    return found
+
+
+def has_refmap(names):
+    top = {n.split("/")[0] for n in names}
+    return any(r in top for r in REFMAP_NAMES)
+
+
+def dir_signature(path):
+    count = size = newest = 0
+    for base, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+        for name in files:
+            if name.endswith((".py", ".yml", ".yaml", ".json")):
+                try:
+                    st = os.stat(os.path.join(base, name))
+                except OSError:
+                    continue
+                count += 1
+                size += st.st_size
+                newest = max(newest, st.st_mtime_ns)
+        if count > 3000:
+            break
+    return (count, size, newest)
+
+
+def decode(data):
+    for enc in ("utf-8-sig", "utf-8"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return data.decode("utf-8", errors="replace")
+
+
+def refmap_value(text, key):
+    for line in text.splitlines():
+        field, separator, value = line.partition(":")
+        if not separator or field.strip().strip("\"'") != key:
+            continue
+
+        value = value.strip()
+        if value.startswith(("'", '"')):
+            quote = value[0]
+            value = value[1:].split(quote, 1)[0]
+        else:
+            value = value.split("#", 1)[0]
+        return value.strip() or None
+    return None
+
+
+def protection_of(*texts):
+    for text in texts:
+        match = RE_PROTECT.search(text or "")
+        if match and match.group(1).lower() in PROTECT_LEVELS:
+            return match.group(1).lower()
+    return "review"
+
+
+def elyx_info(path, ident, name, sources, protection="review", scan_complete=True):
+    src = "\n".join(sources)
+    imports = imports_of(src)
+    requested = [p for p in PERMS if p in perms_in(src)]
+    if not scan_complete:
+        requested = list(PERMS)
+    return {
+        "id": ident,
+        "name": name or ident,
+        "path": path,
+        "kind": "elyx",
+        "protection": protection,
+        "declared": [],
+        "has_id": True,
+        "scan_complete": scan_complete,
+        "requested": requested,
+        "imports": sorted(imports),
+    }
+
+
+def scan_archive(path):
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+            if not has_refmap(names):
+                return None
+            refmap = next((decode(zf.read(r)) for r in REFMAP_NAMES if r in names), "")
+            candidates = [refmap_value(refmap, "metainfo")] + list(META_NAMES)
+            meta_text = next((decode(zf.read(c)) for c in candidates if c and c in names), "")
+            sources, total, scan_complete = [], 0, True
+            for info in zf.infolist():
+                if not info.filename.endswith(".py") or "/.elyx/" in info.filename:
+                    continue
+                remaining = SOURCE_CAP - total
+                with zf.open(info) as source_file:
+                    data = source_file.read(remaining + 1)
+                if len(data) > remaining:
+                    scan_complete = False
+                    break
+                total += len(data)
+                sources.append(decode(data))
+    except Exception:
+        return None
+    ident = RE_YAML_ID.search(meta_text)
+    name = RE_YAML_NAME.search(meta_text)
+    ident = ident.group(1) if ident else os.path.basename(path).split(".")[0]
+    return elyx_info(
+        path,
+        ident,
+        name.group(1).strip() if name else None,
+        sources,
+        protection_of(meta_text, refmap),
+        scan_complete,
+    )
+
+
+def read_folder_text(folder, relative_path):
+    try:
+        with open(os.path.join(folder, relative_path), "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def folder_metadata(path):
+    refmap = next((read_folder_text(path, name) for name in REFMAP_NAMES
+                   if os.path.exists(os.path.join(path, name))), "")
+    candidates = [refmap_value(refmap, "metainfo")] + list(META_NAMES)
+    meta_text = ""
+    for candidate in candidates:
+        if candidate:
+            meta_text = read_folder_text(path, candidate)
+            if meta_text:
+                break
+    return refmap, meta_text
+
+
+def folder_sources(path):
+    sources, total, scan_complete = [], 0, True
+    for base, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            full = os.path.join(base, name)
+            try:
+                remaining = SOURCE_CAP - total
+                with open(full, "rb") as source_file:
+                    data = source_file.read(remaining + 1)
+                if len(data) > remaining:
+                    return sources, False
+                total += len(data)
+                sources.append(decode(data))
+            except OSError:
+                scan_complete = False
+                continue
+    return sources, scan_complete
+
+
+def scan_folder(path):
+    if not any(os.path.exists(os.path.join(path, name)) for name in REFMAP_NAMES):
+        return None
+    refmap, meta_text = folder_metadata(path)
+    sources, scan_complete = folder_sources(path)
+    ident = RE_YAML_ID.search(meta_text)
+    name = RE_YAML_NAME.search(meta_text)
+    ident = ident.group(1) if ident else os.path.basename(path.rstrip(os.sep))
+    return elyx_info(
+        path,
+        ident,
+        name.group(1).strip() if name else None,
+        sources,
+        protection_of(meta_text, refmap),
+        scan_complete,
+    )
+
+
+def read_plugin_source(path):
+    try:
+        with open(path, "rb") as source_file:
+            data = source_file.read(SOURCE_CAP + 1)
+    except OSError:
+        return None, False
+    complete = len(data) <= SOURCE_CAP
+    return decode(data[:SOURCE_CAP]), complete
+
+
+def declared_permissions(meta):
+    declared = meta.get("__permissions__") or []
+    if isinstance(declared, str):
+        declared = [declared]
+    if not isinstance(declared, (list, tuple, set)):
+        return []
+    return [permission for permission in declared if permission in PERMS]
+
+
+def requested_permissions(source, declared, complete):
+    if not complete:
+        return list(PERMS)
+    detected = set(declared) | perms_in(source)
+    return [permission for permission in PERMS if permission in detected]
+
+
+def scan_plugin_file(path):
+    source, complete = read_plugin_source(path)
+    if source is None:
+        return None
+    meta = read_meta(source)
+    if meta is None:
+        return None
+    declared = declared_permissions(meta)
+    pid = meta.get("__id__") or os.path.splitext(os.path.basename(path))[0]
+    return {
+        "id": str(pid),
+        "name": str(meta.get("__name__") or pid),
+        "path": path,
+        "kind": "single",
+        "declared": declared,
+        "has_id": "__id__" in meta,
+        "scan_complete": complete,
+        "requested": requested_permissions(source, declared, complete),
+        "imports": sorted(imports_of(source)),
+    }
+
+
+def scan_file(path):
+    with STATE.scan_lock:
+        return scan_file_cached(path)
+
+
+def scan_file_cached(path):
+    load_scan_cache()
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    is_dir = os.path.isdir(path)
+    key = dir_signature(path) if is_dir else (st.st_size, st.st_mtime_ns)
+    hit = STATE.scan_cache.get(path)
+    if hit and hit[0] == key:
+        return hit[1]
+    if is_dir:
+        info = scan_folder(path)
+    elif path.lower().endswith(PLUGIN_EXT):
+        info = scan_plugin_file(path)
+    else:
+        info = scan_archive(path) or scan_plugin_file(path)
+    if info is None:
+        return None
+    STATE.scan_cache[path] = (key, info)
+    if os.path.dirname(path) == plugins_dir():
+        STATE.scan_dirty = True
+    return info
+
+
+def scan_all(max_age=0.0):
+    with STATE.scan_lock:
+        return scan_all_cached(max_age)
+
+
+def scan_all_cached(max_age=0.0):
+    now = time.monotonic()
+    if max_age and STATE.scan_all and now - STATE.last_scan < max_age:
+        return STATE.scan_all
+    out = {}
+    root = plugins_dir()
+    try:
+        with os.scandir(root) as it:
+            entries = sorted((e.name, e.is_dir()) for e in it)
+    except Exception:
+        return out
+    seen = set()
+    for name, is_dir in entries:
+        if is_dir:
+            if name.startswith("."):
+                continue
+        elif not name.endswith(PLUGIN_EXT):
+            continue
+        path = os.path.join(root, name)
+        info = scan_file(path)
+        if info is None:
+            continue
+        seen.add(path)
+        if info["id"] != __id__:
+            out[info["id"]] = info
+    for path in [p for p in STATE.scan_cache if os.path.dirname(p) == root and p not in seen]:
+        STATE.scan_cache.pop(path, None)
+        STATE.scan_dirty = True
+    STATE.scan_all = out
+    STATE.last_scan = now
+    return out
+
+
+def plugin_info_snapshot():
+    with STATE.lock:
+        return dict(STATE.plugin_infos)
+
+
+def load_grants():
+    with STATE.lock:
+        try:
+            raw = json.loads(cfg("grants", "{}") or "{}")
+            STATE.grants = {k: [p for p in v if p in PERMS] for k, v in raw.items() if isinstance(v, list)}
+        except Exception:
+            STATE.grants = {}
+
+
+def save_grants(reload_ui=False):
+    with STATE.lock:
+        try:
+            data = json.dumps(STATE.grants, sort_keys=True)
+            STATE.plugin.set_setting("grants", data, reload_settings=reload_ui)
+        except TypeError:
+            STATE.plugin.set_setting("grants", data)
+        except Exception:
+            log("error", traceback.format_exc())
+
+
+def set_grants(pid, perms, reload_ui=False, persist=True):
+    with STATE.lock:
+        if perms is None:
+            STATE.grants.pop(pid, None)
+        else:
+            STATE.grants[pid] = [p for p in PERMS if p in set(perms)]
+            STATE.pending.discard(pid)
+        if persist:
+            save_grants(reload_ui)
+
+
+def toggled(pid, perm, value=None):
+    with STATE.lock:
+        now = set(STATE.grants.get(pid) or [])
+        if value is None:
+            now.symmetric_difference_update({perm})
+        elif value:
+            now.add(perm)
+        else:
+            now.discard(perm)
+        return now
+
+
+def migrate(plugins):
+    if cfg("migrated", False):
+        return
+    with STATE.lock:
+        for pid, info in plugins.items():
+            if pid not in STATE.grants and info.get("scan_complete", True):
+                STATE.grants[pid] = [p for p in PERMS if p in info["requested"]]
+        save_grants()
+    STATE.plugin.set_setting("migrated", True)
+
+ctx_pid = contextvars.ContextVar("extera_more_pid", default=None)
+
+
+def with_plugin_context(pid):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*a, **k):
+            token = ctx_pid.set(pid)
+            try:
+                return func(*a, **k)
+            finally:
+                ctx_pid.reset(token)
+        wrapper.em_ctx = True
+        return wrapper
+    return decorator
+
+
+def wrap_class_callbacks(cls, pid):
+    if not pid or pid == __id__ or cls is STATE.self_cls:
+        return
+    for name, fn in list(cls.__dict__.items()):
+        if not (name.startswith("on_") or name == "create_settings") \
+                or not isinstance(fn, types.FunctionType) or getattr(fn, "em_ctx", False):
+            continue
+        try:
+            setattr(cls, name, with_plugin_context(pid)(fn))
+            STATE.ctx_patches.append((cls, name, fn))
+        except Exception:
+            pass
+
+
+def unwrap_class_callbacks():
+    for cls, name, fn in reversed(STATE.ctx_patches):
+        try:
+            setattr(cls, name, fn)
+        except Exception:
+            pass
+    STATE.ctx_patches = []
+
+
+def caller_plugin():
+    current = ctx_pid.get()
+    if current is not None:
+        return None if current == __id__ else current
+    try:
+        frame = sys._getframe(2)
+    except ValueError:
+        return None
+    for frame_depth in range(48):
+        if frame is None:
+            return None
+        pid = frame.f_globals.get("__id__")
+        if not isinstance(pid, str):
+            pid = pid_from_file(frame.f_code.co_filename)
+        if pid:
+            return None if pid == __id__ else pid
+        frame = frame.f_back
+    return None
+
+
+def toast(text):
+    try:
+        from android_utils import run_on_ui_thread
+        from ui.bulletin import BulletinHelper
+        run_on_ui_thread(lambda: BulletinHelper.show_error(text))
+    except Exception:
+        pass
+
+
+def allowed(pid, perm, what):
+    if pid is None or not STATE.on:
+        return True
+    granted = STATE.grants.get(pid)
+    if granted is None:
+        STATE.pending.add(pid)
+        if not cfg("strict_new", True):
+            return True
+    elif perm in granted:
+        return True
+    mark = (pid, perm)
+    if mark not in STATE.denied:
+        STATE.denied[mark] = 0
+        log("warning", "denied '%s' (%s) to plugin %s" % (perm, what, pid))
+        toast(tr("denied", pid, tr("perm." + perm)))
+    STATE.denied[mark] += 1
+    return False
+
+
+def rw_roots(pid):
+    return [cache_dir(), tempfile.gettempdir(), os.path.join(plugins_dir(), pid),
+            os.path.join(dir("files", ""), pid)]
+
+
+def ro_roots():
+    roots = [sys.prefix, sys.exec_prefix, sys.base_prefix]
+    roots.extend(p for p in sys.path if p)
+    return roots
+
+
+def under(path, roots):
+    return any(path == r or path.startswith(r.rstrip(os.sep) + os.sep) for r in roots if r)
+
+prefix_cache = [None, None, -1]
+
+
+def prefixes(read_only):
+    n = len(sys.path)
+    if prefix_cache[0] is None or prefix_cache[2] != n:
+        rw = tuple(r.rstrip(os.sep) + os.sep for r in (cache_dir(), tempfile.gettempdir()) if r)
+        prefix_cache[0] = rw
+        prefix_cache[1] = rw + tuple(r.rstrip(os.sep) + os.sep for r in ro_roots() if r)
+        prefix_cache[2] = n
+    return prefix_cache[1] if read_only else prefix_cache[0]
+
+
+def fast_ok(target, read_only):
+    kind = type(target)
+    if kind is int:
+        return True
+    if kind is not str or ".." in target:
+        return False
+    return target.startswith(prefixes(read_only))
+
+
+def path_ok(pid, target, read_only):
+    if isinstance(target, int):
+        return True
+    try:
+        path = os.path.abspath(os.fspath(target))
+    except Exception:
+        return True
+    if isinstance(path, bytes):
+        path = os.fsdecode(path)
+    base = os.path.basename(path)
+    if os.path.dirname(path) == plugins_dir() and os.path.splitext(base)[0] == pid:
+        return True
+    if under(path, rw_roots(pid)):
+        return True
+    return read_only and under(path, ro_roots())
+
+JAVA_HOOKS_MIN = (12, 8, 1)
+JAVA_HOOKS_MAX = (12, 10, 99)
+PY_GATES_MIN = (12, 8, 1)
+
+
+def parse_ver(text):
+    nums = [int(n) for n in re.findall(r"\d+", str(text))[:3]]
+    return tuple(nums + [0] * (3 - len(nums)))
+
+
+def app_build():
+    parts = []
+    try:
+        from org.telegram.messenger import BuildVars
+        for field in ("BUILD_VERSION_STRING", "BUILD_VERSION"):
+            try:
+                parts.append(str(getattr(BuildVars, field)))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return "/".join(parts) or "?"
+
+
+def build_version():
+    first = app_build().split("/")[0]
+    return parse_ver(first) if re.search(r"\d", first) else None
+
+
+def java_hooks_ok():
+    if cfg("compat_force", False):
+        return True
+    ver = build_version()
+    return ver is not None and JAVA_HOOKS_MIN <= ver <= JAVA_HOOKS_MAX
+
+
+def py_gates_ok():
+    if cfg("compat_force", False):
+        return True
+    ver = build_version()
+    return ver is not None and ver >= PY_GATES_MIN
+
+
+def patch(obj, attr, make):
+    try:
+        orig = getattr(obj, attr)
+        setattr(obj, attr, make(orig))
+        STATE.gate_patches.append((obj, attr, orig))
+        return True
+    except Exception:
+        log("warning", "cannot gate %s.%s" % (getattr(obj, "__name__", obj), attr))
+        return False
+
+
+def simple_gate(perm, what, soft=False):
+    def make(orig):
+        def wrapper(*a, **k):
+            if STATE.on and not allowed(caller_plugin(), perm, what):
+                if soft:
+                    return None
+                raise PermissionError("[exteraMore] '%s' denied" % perm)
+            return orig(*a, **k)
+        return wrapper
+    return make
+
+PATH_KWARGS = ("file", "path", "src", "dst", "target")
+
+
+def path_gate(read_only_fn, npaths=1):
+    def make(orig):
+        def wrapper(*a, **k):
+            if STATE.on and (a or k):
+                ro = read_only_fn(a, k)
+                targets = a[:npaths] if a else tuple(k[n] for n in PATH_KWARGS if n in k)
+                slow = [x for x in targets
+                        if isinstance(x, (str, bytes, os.PathLike, int)) and not fast_ok(x, ro)]
+                if slow:
+                    pid = caller_plugin()
+                    if pid is not None:
+                        for target in slow:
+                            if not path_ok(pid, target, ro) and not allowed(pid, "files", "file access"):
+                                raise PermissionError("[exteraMore] 'files' denied")
+            return orig(*a, **k)
+        return wrapper
+    return make
+
+
+def open_is_readonly(a, k):
+    mode = a[1] if len(a) > 1 else k.get("mode", "r")
+    return isinstance(mode, str) and not any(c in mode for c in "wax+")
+
+
+def method_gate(perm, what):
+    def make(orig):
+        def wrapper(self, *a, **k):
+            pid = getattr(self, "id", None)
+            if not isinstance(pid, str):
+                pid = caller_plugin()
+            if STATE.on and pid and pid != __id__ and not allowed(pid, perm, what):
+                return None
+            return orig(self, *a, **k)
+        return wrapper
+    return make
+
+SEND_FUNCS = ("send_message", "send_text", "send_photo", "send_document",
+               "send_video", "send_audio", "edit_message")
+WRITE_REQUESTS = ("TL_messages_send", "TL_messages_edit", "TL_messages_delete")
+
+
+def request_gate(request_index):
+    def make(orig):
+        def wrapper(*a, **k):
+            if STATE.on:
+                pid = caller_plugin()
+                req = a[request_index] if len(a) > request_index else k.get("request")
+                name = type(req).__name__ if req is not None else ""
+                perm = "messages.send" if name.startswith(WRITE_REQUESTS) else "messages.read"
+                if not allowed(pid, perm, "send_request"):
+                    return None
+            return orig(*a, **k)
+        return wrapper
+    return make
+
+
+def settings_gate():
+    def make(orig):
+        def wrapper(plugin_id, *a, **k):
+            if STATE.on:
+                pid = caller_plugin()
+                if pid is not None and pid != plugin_id and not allowed(pid, "settings", "other plugin settings"):
+                    raise PermissionError("[exteraMore] 'settings' denied")
+            return orig(plugin_id, *a, **k)
+        return wrapper
+    return make
+
+CLIENT_GATES = (
+    ("hook_method", "hooks"), ("hook_all_methods", "hooks"), ("hook_all_constructors", "hooks"),
+    ("add_hook", "messages.read"), ("add_on_send_message_hook", "messages.send"),
+    ("add_file_hook", "files"), ("add_intent_hook", "intents"),
+)
+SETTINGS_FUNCS = ("get_setting", "set_setting", "get_all_settings", "set_all_settings", "clear_settings")
+
+
+def install_client_gates():
+    try:
+        import base_plugin
+        for name, perm in CLIENT_GATES:
+            patch(base_plugin.BasePlugin, name, method_gate(perm, name))
+    except Exception:
+        log("warning", traceback.format_exc())
+
+    try:
+        import client_utils
+        for name in SEND_FUNCS:
+            for owner in (client_utils, client_utils.AccountClient):
+                if hasattr(owner, name):
+                    patch(owner, name, simple_gate("messages.send", name, soft=True))
+        patch(client_utils, "send_request", request_gate(0))
+        patch(client_utils.AccountClient, "send_request", request_gate(1))
+    except Exception:
+        log("warning", traceback.format_exc())
+
+    try:
+        import plugin_settings
+        for name in SETTINGS_FUNCS:
+            patch(plugin_settings, name, settings_gate())
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def install_gates():
+    if STATE.gate_patches:
+        remove_gates()
+    patch(socket.socket, "connect", simple_gate("network", "socket.connect"))
+    patch(socket.socket, "connect_ex", simple_gate("network", "socket.connect_ex"))
+    patch(socket, "getaddrinfo", simple_gate("network", "getaddrinfo"))
+    patch(socket, "create_connection", simple_gate("network", "create_connection"))
+
+    patch(builtins, "open", path_gate(open_is_readonly))
+    patch(io, "open", path_gate(open_is_readonly))
+    for name in ("remove", "unlink", "rmdir", "mkdir", "makedirs"):
+        if hasattr(os, name):
+            patch(os, name, path_gate(lambda a, k: False))
+    for name in ("rename", "replace"):
+        patch(os, name, path_gate(lambda a, k: False, 2))
+    for name in ("listdir", "scandir"):
+        patch(os, name, path_gate(lambda a, k: True))
+    patch(shutil, "rmtree", path_gate(lambda a, k: False))
+    for name in ("copy", "copyfile", "copy2", "move"):
+        patch(shutil, name, path_gate(lambda a, k: False, 2))
+
+    try:
+        import ctypes
+        patch(ctypes.CDLL, "__init__", simple_gate("native", "ctypes.CDLL"))
+    except Exception:
+        pass
+
+    if py_gates_ok():
+        install_client_gates()
+    else:
+        log("warning", "client %s is below the supported range; SDK gates are off" % app_build())
+
+
+def remove_gates():
+    for obj, attr, orig in reversed(STATE.gate_patches):
+        try:
+            setattr(obj, attr, orig)
+        except Exception:
+            pass
+    STATE.gate_patches = []
+
+DEFAULT_LAZY = ("requests,urllib3,sqlite3,zipfile,tarfile,csv,xml.etree.ElementTree,"
+                 "html.parser,difflib,decimal,uuid,http.client,mimetypes,textwrap")
+
+
+class PluginImportFinder(importlib.abc.MetaPathFinder):
+
+    def __init__(self, names):
+        self.names = set(names)
+        self.busy = set()
+
+    @staticmethod
+    def imported_by_plugin():
+        try:
+            frame = sys._getframe(2)
+        except ValueError:
+            return False
+        while frame is not None:
+            filename = frame.f_code.co_filename
+            if "importlib" in filename:
+                frame = frame.f_back
+                continue
+            pid = frame.f_globals.get("__id__")
+            if not isinstance(pid, str):
+                pid = pid_from_file(filename)
+            return isinstance(pid, str) and pid != __id__
+        return False
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname not in self.names or fullname in sys.modules or fullname in self.busy:
+            return None
+        if not self.imported_by_plugin():
+            return None
+        self.busy.add(fullname)
+        try:
+            for finder in sys.meta_path:
+                if finder is self or not hasattr(finder, "find_spec"):
+                    continue
+                spec = finder.find_spec(fullname, path, target)
+                if spec is None:
+                    continue
+                loader = spec.loader
+                if loader is None or not hasattr(loader, "exec_module") or \
+                        type(loader).__name__ in ("ExtensionFileLoader", "BuiltinImporter", "FrozenImporter"):
+                    return None
+                spec.loader = importlib.util.LazyLoader(loader)
+                return spec
+        except Exception:
+            return None
+        finally:
+            self.busy.discard(fullname)
+        return None
+
+
+def enable_import_cache():
+    if STATE.old_dont_write is not None:
+        return
+    prefix = os.path.join(cache_dir(), "extera_more", "pyc")
+    try:
+        os.makedirs(prefix, exist_ok=True)
+        STATE.old_pyc_prefix = sys.pycache_prefix
+        STATE.old_dont_write = sys.dont_write_bytecode
+        sys.pycache_prefix = prefix
+        sys.dont_write_bytecode = False
+    except Exception:
+        log("warning", "bytecode cache unavailable")
+
+
+def disable_import_cache():
+    if STATE.old_dont_write is not None:
+        try:
+            sys.pycache_prefix = STATE.old_pyc_prefix
+            sys.dont_write_bytecode = bool(STATE.old_dont_write)
+        except Exception:
+            pass
+    STATE.old_pyc_prefix = STATE.old_dont_write = None
+
+
+def warm_imports(plugins):
+    roots = {r for info in plugins.values() for r in info["imports"]}
+    for root in sorted(roots)[:24]:
+        if root in sys.modules or root in sys.builtin_module_names:
+            continue
+        try:
+            importlib.util.find_spec(root)
+        except Exception:
+            pass
+
+
+def enable_lazy(raw=None):
+    if STATE.lazy_finder is not None:
+        return
+    raw = cfg("lazy_modules", DEFAULT_LAZY) if raw is None else raw
+    names = [n.strip() for n in str(raw).split(",") if n.strip()]
+    STATE.lazy_finder = PluginImportFinder(names)
+    sys.meta_path.insert(0, STATE.lazy_finder)
+
+
+def disable_lazy():
+    if STATE.lazy_finder is not None:
+        try:
+            sys.meta_path.remove(STATE.lazy_finder)
+        except ValueError:
+            pass
+        STATE.lazy_finder = None
+
+INSTALL_MAP = {
+    "prefix": "com.exteragram.messenger.plugins",
+    "show_prefix": "showinstall",
+    "cap": 20,
+    "fallback": [
+        "com.exteragram.messenger.plugins.PluginsController",
+        "com.exteragram.messenger.plugins.PythonPluginsEngine",
+        "com.exteragram.messenger.plugins.Plugin",
+        "com.exteragram.messenger.plugins.ui.components.InstallPluginBottomSheet",
+        "com.exteragram.messenger.plugins.ui.components.InstallPluginBottomSheet$PluginInstallParams",
+    ],
+}
+
+
+def install_map():
+    out = dict(INSTALL_MAP)
+    try:
+        raw = json.loads(cfg("install_map", "{}") or "{}")
+        for key, default in INSTALL_MAP.items():
+            if key in raw and type(raw[key]) is type(default):
+                out[key] = raw[key]
+    except Exception:
+        pass
+    return out
+
+java_classes = {}
+
+
+def jc(name):
+    cls = java_classes.get(name)
+    if cls is None:
+        cls = jc_load(name)
+        if cls is not None:
+            if len(java_classes) >= 256:
+                for k in list(java_classes)[:96]:
+                    java_classes.pop(k, None)
+            java_classes[name] = cls
+    return cls
+
+
+def jc_load(name):
+    try:
+        from java.lang import Class
+    except ImportError:
+        from hook_utils import find_class
+        return find_class(name)
+    try:
+        return Class.forName(name)
+    except Exception:
+        pass
+    try:
+        from org.telegram.messenger import ApplicationLoader
+        return ApplicationLoader.applicationContext.getClassLoader().loadClass(name)
+    except Exception:
+        return None
+
+
+def scan_dex():
+    names = []
+    prefix = install_map()["prefix"]
+    try:
+        from dalvik.system import DexFile
+        from org.telegram.messenger import ApplicationLoader
+        info = ApplicationLoader.applicationContext.getApplicationInfo()
+        paths = [str(info.sourceDir)] + [str(x) for x in (info.splitSourceDirs or [])]
+        for path in paths:
+            dex = DexFile(path)
+            try:
+                entries = dex.entries()
+                while entries.hasMoreElements():
+                    name = str(entries.nextElement())
+                    if name.startswith(prefix):
+                        names.append(name)
+            finally:
+                dex.close()
+    except Exception as e:
+        log("warning", "dex scan failed: %s" % e)
+    return names
+
+
+def plugin_class_names():
+    build = app_build()
+    try:
+        raw = json.loads(cfg("plugin_classes", "{}") or "{}")
+        if raw.get("build") == build and raw.get("names"):
+            return list(raw["names"])
+    except Exception:
+        pass
+    fallback = list(install_map()["fallback"])
+    if sum(1 for n in fallback if jc(n) is not None) >= 3:
+        return fallback
+    names = scan_dex()
+    if names:
+        try:
+            STATE.plugin.set_setting("plugin_classes", json.dumps({"build": build, "names": names}))
+        except Exception:
+            pass
+        return names
+    return fallback
+
+
+def capture_install_args(param):
+    try:
+        STATE.install_args = [param.args[index] for index in range(len(param.args))]
+        STATE.install_seen_at = time.time()
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def force_install_trusted(param):
+    capture_install_args(param)
+    try:
+        param.args[2] = True
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def trust_install_constructor(param):
+    if len(param.args) == 2:
+        param.args[1] = True
+
+
+def hook_install_methods(cls, cap, show_prefix, trust, hooked):
+    for method in cls.getDeclaredMethods():
+        name = str(method.getName())
+        lowered_name = name.lower()
+        if hooked[0] >= cap or method.isSynthetic():
+            continue
+        if lowered_name.startswith(show_prefix.lower()):
+            parameter_types = [str(p.getName()) for p in method.getParameterTypes()]
+            exact_signature = (len(parameter_types) == 3
+                               and parameter_types[1] == "java.lang.String"
+                               and parameter_types[2] == "boolean")
+            callback = force_install_trusted if trust and exact_signature else capture_install_args
+            hook_method(method, before=callback)
+            hooked[0] += 1
+        elif (trust and "trust" in lowered_name
+              and str(method.getReturnType().getName()) == "boolean"):
+            hook_method(method, after=lambda param: param.setResult(True))
+            hooked[0] += 1
+
+
+def hook_install_constructors(cls, class_name):
+    if "PluginInstallParams" not in class_name:
+        return
+    for constructor in cls.getDeclaredConstructors():
+        parameter_types = [str(p.getName()) for p in constructor.getParameterTypes()]
+        if len(parameter_types) == 2 and parameter_types[1] == "boolean":
+            hook_method(constructor, before=trust_install_constructor)
+
+
+def install_install_hooks(trust):
+    if not java_hooks_ok():
+        return
+    imap = install_map()
+    names = plugin_class_names()
+    hooked = [0]
+    for cname in names:
+        if not STATE.alive:
+            return
+        cls = jc(cname)
+        if cls is None:
+            continue
+        try:
+            hook_install_methods(cls, imap["cap"], imap["show_prefix"], trust, hooked)
+            if trust:
+                hook_install_constructors(cls, cname)
+        except Exception:
+            log("warning", traceback.format_exc())
+    try:
+        hook_install_sheets(names)
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def activity():
+    try:
+        from client_utils import get_last_fragment
+        frag = get_last_fragment()
+        return frag.getParentActivity() if frag else None
+    except Exception:
+        return None
+
+
+def status_of(pid):
+    granted = STATE.grants.get(pid)
+    if granted is None:
+        return tr("pending")
+    if not granted:
+        return tr("none")
+    return tr("perms_of", len(granted), len(PERMS))
+
+
+def open_plugin_settings(pid):
+    def run():
+        try:
+            from com.exteragram.messenger.plugins import PluginsController
+            PluginsController.getInstance().openPluginSettings(pid)
+        except Exception:
+            log("warning", traceback.format_exc())
+    on_ui(run)
+
+
+def answer_prompt(pid, perms):
+    set_grants(pid, perms, reload_ui=True)
+    later(prompt_pending, 300)
+
+
+def prompt_pending():
+    ctx = activity()
+    if ctx is None or not STATE.on:
+        return
+    from ui.alert import AlertDialogBuilder
+    for pid in sorted(STATE.pending):
+        info = STATE.plugin_infos.get(pid)
+        if pid in STATE.prompted or pid in STATE.grants or not info:
+            continue
+        STATE.prompted.add(pid)
+        wanted = info["requested"]
+        danger = bool(DANGEROUS.intersection(wanted))
+        lines = "\n".join("• " + tr("perm." + p) for p in wanted) or "• " + tr("none")
+        text = tr("req_msg", info["name"], lines)
+        if danger:
+            text += tr("req_danger")
+        if not info.get("scan_complete", True):
+            text += tr("scan_incomplete_request")
+        dialog = AlertDialogBuilder(ctx).set_title(tr("req_title")).set_message(text) \
+            .set_positive_button(tr("allow"), lambda b, w, pid=pid, wanted=wanted: answer_prompt(pid, wanted)) \
+            .set_negative_button(tr("deny"), lambda b, w, pid=pid: answer_prompt(pid, []))
+        if danger:
+            dialog.make_button_red(AlertDialogBuilder.BUTTON_POSITIVE)
+        dialog.set_cancelable(False)
+        dialog.show()
+        return
+
+MAX_ENTRIES = 6000
+MAX_READ = 2000000
+MAX_SHOW = 400000
+MAX_NESTED = 12000000
+MAX_DEPTH = 2
+NESTED_EXT = (".whl", ".zip", ".egg", ".elyx", ".eaf")
+SKIP_DIRS = (".git", ".idea")
+
+
+class ProjectFileNode:
+    __slots__ = ("name", "path", "kind", "size", "children", "source", "depth", "expanded", "built")
+
+    def __init__(self, name, path, kind, size=0, source=None, depth=0):
+        self.name = name
+        self.path = path
+        self.kind = kind
+        self.size = size
+        self.children = []
+        self.source = source
+        self.depth = depth
+        self.expanded = False
+        self.built = kind == "file"
+
+    @property
+    def expandable(self):
+        return self.kind in ("dir", "archive")
+
+
+def sort_nodes(node):
+    node.children.sort(key=lambda n: (n.kind == "file", n.name.lower()))
+    for child in node.children:
+        if child.children:
+            sort_nodes(child)
+
+
+class ZipArchiveSource:
+    def __init__(self, fileobj, depth=0):
+        self.zf = zipfile.ZipFile(fileobj)
+        self.depth = depth
+
+    def build(self, label):
+        root = ProjectFileNode(label, "", "dir", source=self, depth=0)
+        root.built = True
+        index = {"": root}
+        for count, info in enumerate(self.zf.infolist()):
+            if count >= MAX_ENTRIES:
+                break
+            name = info.filename.replace("\\", "/")
+            if name.startswith("/") or ".." in name.split("/"):
+                continue
+            parts = [p for p in name.split("/") if p]
+            if not parts or any(p in SKIP_DIRS for p in parts[:-1]):
+                continue
+            parent_path = ""
+            for part in parts[:-1]:
+                path = parent_path + part + "/"
+                if path not in index:
+                    node = ProjectFileNode(part, path, "dir", source=self)
+                    node.built = True
+                    index[path] = node
+                    index[parent_path].children.append(node)
+                parent_path = path
+            leaf = parts[-1]
+            if info.is_dir():
+                path = parent_path + leaf + "/"
+                if path not in index:
+                    node = ProjectFileNode(leaf, path, "dir", source=self)
+                    node.built = True
+                    index[path] = node
+                    index[parent_path].children.append(node)
+                continue
+            nested = leaf.lower().endswith(NESTED_EXT) and info.file_size <= MAX_NESTED \
+                and self.depth < MAX_DEPTH
+            node = ProjectFileNode(leaf, name, "archive" if nested else "file",
+                                   info.file_size, source=self, depth=self.depth)
+            node.built = not nested
+            index[parent_path].children.append(node)
+        sort_nodes(root)
+        return root
+
+    def read(self, node, limit=MAX_READ):
+        with self.zf.open(node.path) as fh:
+            data = fh.read(limit + 1)
+        return data[:limit], len(data) > limit
+
+
+class DirectorySource:
+    def __init__(self, root, depth=0):
+        self.root = root
+        self.depth = depth
+        self.count = 0
+
+    def build(self, label):
+        root = ProjectFileNode(label, "", "dir", source=self)
+        root.built = True
+        self.fill(root, self.root)
+        sort_nodes(root)
+        return root
+
+    def fill(self, node, folder):
+        try:
+            with os.scandir(folder) as it:
+                entries = sorted(it, key=lambda e: e.name.lower())
+        except OSError:
+            return
+        for entry in entries:
+            if self.count >= MAX_ENTRIES:
+                return
+            self.count += 1
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    if entry.name in SKIP_DIRS:
+                        continue
+                    child = ProjectFileNode(entry.name, entry.path, "dir", source=self)
+                    child.built = True
+                    self.fill(child, entry.path)
+                    node.children.append(child)
+                else:
+                    size = entry.stat().st_size
+                    nested = entry.name.lower().endswith(NESTED_EXT) and size <= MAX_NESTED \
+                        and self.depth < MAX_DEPTH
+                    child = ProjectFileNode(entry.name, entry.path,
+                                            "archive" if nested else "file", size,
+                                            source=self, depth=self.depth)
+                    child.built = not nested
+                    node.children.append(child)
+            except OSError:
+                continue
+
+    def read(self, node, limit=MAX_READ):
+        with open(node.path, "rb") as fh:
+            data = fh.read(limit + 1)
+        return data[:limit], len(data) > limit
+
+
+def open_project(path):
+    label = os.path.basename(path.rstrip(os.sep)) or path
+    if os.path.isdir(path):
+        return DirectorySource(path).build(label)
+    if zipfile.is_zipfile(path):
+        return ZipArchiveSource(path).build(label)
+    root = ProjectFileNode(label, "", "dir", source=None)
+    root.built = True
+    source = DirectorySource(os.path.dirname(path))
+    leaf = ProjectFileNode(label, path, "file", os.path.getsize(path), source=source)
+    root.children.append(leaf)
+    return root
+
+
+def expand(node):
+    if node.built:
+        return
+    node.built = True
+    data, cut = node.source.read(node, MAX_NESTED)
+    if cut:
+        raise ValueError("archive is larger than %d MB" % (MAX_NESTED // 1000000))
+    sub = ZipArchiveSource(io.BytesIO(data), node.source.depth + 1)
+    inner = sub.build(node.name)
+    node.children = inner.children
+
+
+def human_size(n):
+    if n < 1024:
+        return "%d B" % n
+    if n < 1024 * 1024:
+        return "%.1f KB" % (n / 1024.0)
+    return "%.1f MB" % (n / 1024.0 / 1024.0)
+
+
+def looks_binary(data):
+    head = data[:4096]
+    if b"\x00" in head:
+        return True
+    if not head:
+        return False
+    odd = sum(1 for b in head if b < 9 or 13 < b < 32)
+    return odd / float(len(head)) > 0.12
+
+
+def hex_dump(data, limit=1024):
+    lines = []
+    for off in range(0, min(len(data), limit), 16):
+        chunk = data[off:off + 16]
+        hexes = " ".join("%02x" % b for b in chunk)
+        text = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+        lines.append("%08x  %-47s  %s" % (off, hexes, text))
+    return "\n".join(lines)
+
+
+def load_code(data):
+    for skip in (16, 12, 8):
+        try:
+            code = marshal.loads(data[skip:])
+        except Exception:
+            continue
+        if isinstance(code, types.CodeType):
+            return code
+    return None
+
+
+def signature(code):
+    argc = code.co_argcount
+    names = code.co_varnames
+    args = list(names[:argc])
+    kwonly = list(names[argc:argc + code.co_kwonlyargcount])
+    idx = argc + code.co_kwonlyargcount
+    star = names[idx] if code.co_flags & 0x04 and idx < len(names) else None
+    idx += 1 if star else 0
+    kwargs = names[idx] if code.co_flags & 0x08 and idx < len(names) else None
+    parts = args
+    if star:
+        parts = parts + ["*" + star]
+    elif kwonly:
+        parts = parts + ["*"]
+    parts = parts + kwonly
+    if kwargs:
+        parts = parts + ["**" + kwargs]
+    return ", ".join(parts)
+
+
+def short(value, limit=60):
+    text = repr(value)
+    return text if len(text) <= limit else text[:limit - 1] + "…'"
+
+RE_CODE_REPR = re.compile(r"<code object (\S+) at 0x[0-9a-f]+, file \"[^\"]*\", line (\d+)>")
+
+
+def instructions(code):
+    try:
+        rows = []
+        for ins in dis.get_instructions(code):
+            arg = RE_CODE_REPR.sub(r"<code \1:\2>", str(ins.argrepr)).strip()
+            rows.append((ins.opname, arg))
+        return rows
+    except Exception:
+        return None
+
+
+def docstring(code, rows, is_function):
+    consts = code.co_consts
+    if is_function:
+        return consts[0] if consts and isinstance(consts[0], str) else None
+    if rows is None:
+        return None
+    for (op, arg), nxt in zip(rows, rows[1:]):
+        if op == "LOAD_CONST" and nxt[0] == "STORE_NAME" and nxt[1] == "__doc__":
+            for const in consts:
+                if isinstance(const, str) and arg == repr(const)[:len(arg)]:
+                    return const
+    return None
+
+
+def outline(code, out, indent, same_python, budget):
+    if len(out) > budget:
+        return
+    pad = "    " * indent
+    name = code.co_name
+    is_module = name == "<module>"
+    is_function = bool(code.co_flags & 0x02)
+    if is_module:
+        out.append("# module %s" % code.co_filename)
+    elif is_function:
+        out.append("%sdef %s(%s):" % (pad, name, signature(code)))
+    else:
+        out.append("%sclass %s:" % (pad, name))
+    inner = pad if is_module else pad + "    "
+    rows = instructions(code) if same_python else None
+    doc = docstring(code, rows, is_function)
+    if doc:
+        doc = doc.strip().replace('"""', "\'\'\'")
+        out.append('%s"""%s"""' % (inner, doc[:300] + ("…" if len(doc) > 300 else "")))
+    shown = [short(c) for c in code.co_consts
+             if not isinstance(c, types.CodeType) and c is not doc][:14]
+    if shown:
+        out.append("%s# consts: %s" % (inner, ", ".join(shown)))
+    if code.co_names:
+        out.append("%s# names: %s" % (inner, ", ".join(code.co_names[:24])))
+    if rows is not None:
+        for count, (op, arg) in enumerate(rows):
+            if count >= 300:
+                out.append("%s#   …" % inner)
+                break
+            out.append(("%s#   %s %s" % (inner, op, arg)).rstrip())
+    elif not same_python:
+        out.append("%spass" % inner)
+    out.append("")
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            outline(const, out, indent if is_module else indent + 1, same_python, budget)
+
+
+def decompile_pyc(data):
+    code = load_code(data)
+    if code is None:
+        found = re.findall(rb"[\x20-\x7e]{6,}", data)
+        lines = [s.decode("ascii", "replace") for s in found[:600]]
+        return "\n".join(lines), tr("ide_pyc_broken")
+    same = data[:4] == importlib.util.MAGIC_NUMBER
+    out = []
+    outline(code, out, 0, same, 6000)
+    return "\n".join(out), tr("ide_pyc_note")
+
+RE_RISKY = re.compile(r"(?<![\w.])(?:eval|exec|compile|__import__)\(|"
+                       r"\b(?:os\.system|os\.popen|subprocess\.\w+|marshal\.loads|pickle\.loads|"
+                       r"base64\.b64decode|importlib\.import_module)\(")
+RE_URL = re.compile(r"https?://[^\s'\"<>)\\]+")
+RE_DEF = re.compile(r"^\s*(?:async\s+def|def|class)\s+(\w+)", re.M)
+RISKY_NAMES = frozenset(("eval", "exec", "compile", "__import__", "system", "popen", "Popen", "run",
+                          "check_output", "loads", "b64decode", "import_module", "CDLL", "loadLibrary",
+                          "hook_method", "hook_all_methods", "DexClassLoader"))
+AUDIT_CAP = 60
+
+
+def audit_section(out, title, rows):
+    out.append("# " + title)
+    if not rows:
+        out.append("  " + tr("audit_none"))
+    for row in rows[:AUDIT_CAP]:
+        out.append("  " + row)
+    if len(rows) > AUDIT_CAP:
+        out.append("  " + tr("audit_more", len(rows) - AUDIT_CAP))
+    out.append("")
+
+
+def clean_url(url):
+    return url.split("?")[0].split("#")[0].rstrip(".,;")
+
+
+def audit_source(text, name):
+    lines = text.split("\n")
+    defs = RE_DEF.findall(text)
+    classes = len(re.findall(r"^\s*class\s", text, re.M))
+    out = [tr("audit_title", name), tr("audit_size", len(lines), len(defs) - classes, classes), ""]
+    perms, calls, urls = [], [], []
+    for number, line in enumerate(lines, 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        for marker, perm in MARKERS:
+            if marker in line:
+                perms.append("L%d  %s  %s" % (number, perm, marker))
+                break
+        if RE_OPEN.search(line):
+            perms.append("L%d  files  open(" % number)
+        risky = RE_RISKY.search(line)
+        if risky:
+            calls.append("L%d  %s" % (number, risky.group(0)))
+        for url in RE_URL.findall(line):
+            urls.append("L%d  %s" % (number, clean_url(url)))
+    audit_section(out, tr("audit_imports"), sorted(imports_of(text)))
+    audit_section(out, tr("audit_perms"), perms)
+    audit_section(out, tr("audit_calls"), calls)
+    audit_section(out, tr("audit_urls"), urls)
+    audit_section(out, tr("audit_defs"), defs)
+    return "\n".join(out)
+
+
+def audit_pyc(data, name):
+    out = [tr("audit_title", name), tr("audit_pyc"), ""]
+    code = load_code(data)
+    if code is None:
+        return "\n".join(out + [tr("audit_bad")])
+    defs, risky, urls, stack = [], set(), set(), [code]
+    while stack:
+        current = stack.pop()
+        if current.co_name != "<module>" and not current.co_name.startswith("<"):
+            defs.append(current.co_name)
+        risky.update(n for n in current.co_names if n in RISKY_NAMES)
+        for const in current.co_consts:
+            if isinstance(const, types.CodeType):
+                stack.append(const)
+            elif isinstance(const, str):
+                urls.update(clean_url(u) for u in RE_URL.findall(const))
+    audit_section(out, tr("audit_calls"), sorted(risky))
+    audit_section(out, tr("audit_urls"), sorted(urls))
+    audit_section(out, tr("audit_defs"), sorted(set(defs)))
+    return "\n".join(out)
+
+LANG_BY_EXT = {
+    ".py": "py", ".plugin": "py", ".pyc": "py", ".pyo": "py",
+    ".yml": "yaml", ".yaml": "yaml", ".json": "json",
+}
+
+
+def render_file(node, policy="open"):
+    data, cut = node.source.read(node)
+    ext = os.path.splitext(node.name)[1].lower()
+    result = {"lang": LANG_BY_EXT.get(ext, ""), "note": "", "cut": cut, "size": node.size or len(data)}
+    if policy == "audit" and ext in (".py", ".plugin", ".pyc", ".pyo"):
+        result["lang"] = ""
+        result["note"] = tr("ide_audit")
+        if ext in (".pyc", ".pyo"):
+            result["text"] = audit_pyc(data, node.name)
+        else:
+            result["text"] = audit_source(decode(data), node.name)
+        return result
+    if ext in (".pyc", ".pyo"):
+        result["text"], result["note"] = decompile_pyc(data)
+        return result
+    if looks_binary(data):
+        result["lang"] = ""
+        result["note"] = tr("ide_binary", human_size(result["size"]))
+        result["text"] = hex_dump(data)
+        return result
+    text = decode(data)
+    if len(text) > MAX_SHOW:
+        text = text[:MAX_SHOW]
+        result["cut"] = True
+    result["text"] = text
+    if result["cut"]:
+        result["note"] = tr("ide_cut", human_size(len(text.encode("utf-8", "ignore"))),
+                            human_size(result["size"]))
+    return result
+
+PY_KEYWORDS = (
+    "False|None|True|and|as|assert|async|await|break|class|continue|def|del|elif|else|except|"
+    "finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|"
+    "with|yield|self|cls"
+)
+RE_PY = re.compile(
+    r"(?P<comment>#[^\n]*)"
+    r"|(?P<string>(?:[rRbBuUfF]{1,2})?(?:\"\"\"[\s\S]*?(?:\"\"\"|\Z)|'''[\s\S]*?(?:'''|\Z)"
+    r"|\"(?:\\.|[^\"\\\n])*\"?|'(?:\\.|[^'\\\n])*'?))"
+    r"|(?P<deco>^[ \t]*@[\w.]+)"
+    r"|(?P<defname>(?<=def )\w+|(?<=class )\w+)"
+    r"|(?P<number>\b0[xX][0-9a-fA-F_]+\b|\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?\b)"
+    r"|(?P<keyword>\b(?:" + PY_KEYWORDS + r")\b)",
+    re.M)
+RE_DATA = re.compile(
+    r"(?P<comment>#[^\n]*)"
+    r"|(?P<key>\"(?:\\.|[^\"\\\n])*\"(?=\s*:)|^[ \t-]*[\w.\-]+(?=\s*:))"
+    r"|(?P<string>\"(?:\\.|[^\"\\\n])*\"|'[^'\n]*')"
+    r"|(?P<number>\b-?\d+(?:\.\d+)?\b)"
+    r"|(?P<keyword>\b(?:true|false|null|True|False|yes|no)\b)",
+    re.M)
+MAX_SPANS = 4500
+
+PALETTE_DARK = {"comment": 0xFF6A9955, "string": 0xFFCE9178, "keyword": 0xFF569CD6,
+                 "number": 0xFFB5CEA8, "deco": 0xFFDCDCAA, "defname": 0xFF4EC9B0, "key": 0xFF9CDCFE}
+PALETTE_LIGHT = {"comment": 0xFF008000, "string": 0xFFA31515, "keyword": 0xFF0000FF,
+                  "number": 0xFF098658, "deco": 0xFF795E26, "defname": 0xFF267F99, "key": 0xFF001080}
+
+
+def color_spans(text, lang):
+    if lang == "py":
+        pattern = RE_PY
+    elif lang in ("yaml", "json"):
+        pattern = RE_DATA
+    else:
+        return []
+    spans = []
+    for match in pattern.finditer(text):
+        spans.append((match.start(), match.end(), match.lastgroup))
+        if len(spans) >= MAX_SPANS:
+            break
+    return spans
+
+
+def dp(v):
+    from org.telegram.messenger import AndroidUtilities
+    return AndroidUtilities.dp(v)
+
+
+def theme_color(name, fallback):
+    try:
+        from org.telegram.ui.ActionBar import Theme
+        return Theme.getColor(getattr(Theme, name))
+    except Exception:
+        return fallback
+
+
+def medium(view):
+    try:
+        from org.telegram.messenger import AndroidUtilities
+        view.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"))
+    except Exception:
+        try:
+            from android.graphics import Typeface
+            view.setTypeface(Typeface.DEFAULT_BOLD)
+        except Exception:
+            pass
+
+
+def label(ctx, text, color, size, medium=False):
+    from android.widget import TextView
+    view = TextView(ctx)
+    view.setText(text)
+    view.setTextColor(color)
+    view.setTextSize(2, size)
+    if medium:
+        medium(view)
+    return view
+
+
+def s32(color):
+    value = int(color) & 0xFFFFFFFF
+    return value - (1 << 32) if value >= (1 << 31) else value
+
+
+def round_bg(color, radius_dp):
+    from android.graphics.drawable import GradientDrawable
+    bg = GradientDrawable()
+    bg.setColor(s32(color))
+    bg.setCornerRadius(float(dp(radius_dp)))
+    return bg
+
+
+def ripple(default, pressed, radius_dp):
+    try:
+        from org.telegram.ui.ActionBar import Theme
+        return Theme.createSimpleSelectorRoundRectDrawable(dp(radius_dp), default, pressed)
+    except Exception:
+        return round_bg(default, radius_dp)
+
+
+def icon_view(ctx, name, color):
+    from android.graphics import PorterDuff, PorterDuffColorFilter
+    from android.widget import ImageView
+    view = ImageView(ctx)
+    res = ctx.getResources()
+    rid = res.getIdentifier(name, "drawable", ctx.getPackageName())
+    if rid:
+        drawable = res.getDrawable(rid).mutate()
+        drawable.setColorFilter(PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN))
+        view.setImageDrawable(drawable)
+    return view
+
+
+def drawable_exists(ctx, name):
+    try:
+        return bool(ctx.getResources().getIdentifier(name, "drawable", ctx.getPackageName()))
+    except Exception:
+        return False
+
+
+def notify(text):
+    try:
+        from android_utils import run_on_ui_thread
+        from ui.bulletin import BulletinHelper
+        run_on_ui_thread(lambda: BulletinHelper.show_info(text))
+    except Exception:
+        pass
+
+
+def copy_to_clipboard(ctx, text):
+    try:
+        from org.telegram.messenger import AndroidUtilities
+        AndroidUtilities.addToClipboard(text)
+        return True
+    except Exception:
+        pass
+    try:
+        from android.content import ClipData
+        clip = ctx.getSystemService("clipboard")
+        clip.setPrimaryClip(ClipData.newPlainText("code", text))
+        return True
+    except Exception:
+        log("warning", traceback.format_exc())
+        return False
+
+
+def policy_of(path):
+    try:
+        info = scan_file(path)
+    except Exception:
+        info = None
+    if info and info.get("kind") == "elyx":
+        return info.get("protection", "review")
+    return "open"
+
+
+def opaque(color):
+    value = (int(color) | 0xFF000000) & 0xFFFFFFFF
+    return value - (1 << 32) if value >= (1 << 31) else value
+
+
+class PluginCodeViewer:
+
+    def __init__(self, ctx, path, title):
+        self.ctx = ctx
+        self.path = path
+        self.title = title
+        self.root = None
+        self.current = None
+        self.current_text = ""
+        self.drawer_open = False
+        self.dialog = None
+        self.job = 0
+
+        self.policy = policy_of(path)
+        self.locked = self.policy != "open"
+        bg = opaque(theme_color("key_windowBackgroundWhite", -1))
+        self.bg = bg
+        self.dark = self.is_dark(bg)
+        self.text_color = theme_color("key_windowBackgroundWhiteBlackText", -16777216)
+        self.hint_color = theme_color("key_windowBackgroundWhiteGrayText2", -7829368)
+        self.accent = theme_color("key_windowBackgroundWhiteBlueText", -13134875)
+        self.line_color = theme_color("key_divider", 0x22808080)
+        self.panel_color = opaque(theme_color("key_windowBackgroundGray", 0xF0F0F0 if not self.dark else 0x1C1C1E))
+        self.press = theme_color("key_listSelector", 0x1F808080)
+        self.palette = PALETTE_DARK if self.dark else PALETTE_LIGHT
+
+    @staticmethod
+    def is_dark(color):
+        r, g, b = (color >> 16) & 255, (color >> 8) & 255, color & 255
+        return (0.299 * r + 0.587 * g + 0.114 * b) < 128
+
+    def show(self):
+        from android.app import Dialog
+
+        dialog = Dialog(self.ctx)
+        dialog.requestWindowFeature(1)
+        frame = self.build_dialog_content()
+        self.prepare_dialog_window(dialog, frame)
+        self.install_insets_listener(frame)
+        self.install_back_handler(dialog)
+        self.dialog = dialog
+        STATE.ide = self
+        dialog.show()
+        safe(frame.requestApplyInsets)
+        self.set_status(tr("ide_loading"))
+        threading.Thread(target=self.open_job, name="extera_more-ide", daemon=True).start()
+
+    def build_dialog_content(self):
+        from android.widget import FrameLayout, LinearLayout
+
+        frame = FrameLayout(self.ctx)
+        frame.setBackgroundColor(self.bg)
+        column = LinearLayout(self.ctx)
+        column.setOrientation(1)
+        frame.addView(column, FrameLayout.LayoutParams(-1, -1))
+        self.bar = self.build_bar()
+        column.addView(self.bar, LinearLayout.LayoutParams(-1, -2))
+
+        self.pane = FrameLayout(self.ctx)
+        column.addView(self.pane, LinearLayout.LayoutParams(-1, 0, 1.0))
+        self.build_viewer()
+        self.build_drawer()
+        self.pane.addView(self.scrim, FrameLayout.LayoutParams(-1, -1))
+        self.pane.addView(self.drawer, FrameLayout.LayoutParams(self.drawer_width(), -1))
+        return frame
+
+    def prepare_dialog_window(self, dialog, frame):
+        from android.graphics.drawable import ColorDrawable
+
+        window = dialog.getWindow()
+        window.setLayout(-1, -1)
+        window.setBackgroundDrawable(ColorDrawable(self.bg))
+        self.style_window(window)
+        dialog.setContentView(frame)
+
+    def install_insets_listener(self, frame):
+        from android.view import View
+        from java import dynamic_proxy
+
+        viewer = self
+        class CodeViewerInsetsListener(dynamic_proxy(View.OnApplyWindowInsetsListener)):
+            def onApplyWindowInsets(self, view, insets):
+                try:
+                    viewer.apply_insets(int(insets.getSystemWindowInsetTop()),
+                                         int(insets.getSystemWindowInsetBottom()))
+                except Exception:
+                    log("warning", traceback.format_exc())
+                return insets
+
+        frame.setOnApplyWindowInsetsListener(CodeViewerInsetsListener())
+
+    def drawer_width(self):
+        try:
+            from org.telegram.messenger import AndroidUtilities
+            return min(dp(340), int(AndroidUtilities.displaySize.x * 0.86))
+        except Exception:
+            return dp(300)
+
+    def style_window(self, window):
+        try:
+            window.clearFlags(0x0C000000)
+            window.addFlags(-2147483648)
+            window.setStatusBarColor(self.panel_color)
+            window.setNavigationBarColor(self.bg)
+        except Exception:
+            pass
+        flags = 0
+        try:
+            window.setDecorFitsSystemWindows(False)
+        except Exception:
+            flags |= 0x500
+        if not self.dark:
+            flags |= 0x2010
+        safe(lambda: window.getDecorView().setSystemUiVisibility(flags))
+        if self.locked:
+            safe(lambda: window.addFlags(0x2000))
+
+    def apply_insets(self, top, bottom):
+        self.bar.setPadding(dp(4), top, dp(4), 0)
+        self.pane.setPadding(0, 0, 0, bottom)
+
+    def button(self, icon_names, glyph, on_click):
+        from android.view import Gravity
+        from android.widget import FrameLayout, LinearLayout
+        from android_utils import OnClickListener
+        ctx, dp = self.ctx, dp
+        holder = FrameLayout(ctx)
+        holder.setClickable(True)
+        holder.setBackground(ripple(0, self.press, 20))
+        view = None
+        for name in icon_names:
+            if drawable_exists(ctx, name):
+                view = icon_view(ctx, name, self.text_color)
+                break
+        if view is not None:
+            lp = FrameLayout.LayoutParams(dp(24), dp(24))
+            lp.gravity = Gravity.CENTER
+            holder.addView(view, lp)
+        else:
+            text = label(ctx, glyph, self.text_color, 20.0, medium=True)
+            text.setGravity(Gravity.CENTER)
+            holder.addView(text, FrameLayout.LayoutParams(-1, -1))
+        holder.setOnClickListener(OnClickListener(lambda v: on_click()))
+        return holder
+
+    def build_bar(self):
+        from android.view import Gravity
+        from android.widget import LinearLayout
+        ctx, dp = self.ctx, dp
+        bar = LinearLayout(ctx)
+        bar.setOrientation(0)
+        bar.setGravity(Gravity.CENTER_VERTICAL)
+        bar.setBackgroundColor(self.panel_color)
+        bar.setPadding(dp(4), 0, dp(4), 0)
+
+        bar.addView(self.button(("ic_ab_back",), "‹", self.close), LinearLayout.LayoutParams(dp(48), dp(48)))
+        bar.addView(self.button(("msg_folder", "msg_archive", "msg_list", "msg_openin"), "☰", self.toggle_drawer),
+                    LinearLayout.LayoutParams(dp(48), dp(48)))
+
+        titles = LinearLayout(ctx)
+        titles.setOrientation(1)
+        titles.setPadding(dp(6), 0, dp(6), 0)
+        from android.text import TextUtils
+        end = TextUtils.TruncateAt.END
+        self.title_view = label(ctx, self.title, self.text_color, 17.0, medium=True)
+        self.title_view.setSingleLine(True)
+        self.title_view.setEllipsize(end)
+        self.sub_view = label(ctx, "", self.hint_color, 12.5)
+        self.sub_view.setSingleLine(True)
+        self.sub_view.setEllipsize(end)
+        titles.addView(self.title_view)
+        titles.addView(self.sub_view)
+        bar.addView(titles, LinearLayout.LayoutParams(0, -2, 1.0))
+
+        if not self.locked:
+            bar.addView(self.button(("msg_copy",), "⧉", self.copy_code), LinearLayout.LayoutParams(dp(48), dp(48)))
+        return bar
+
+    def build_viewer(self):
+        from android.graphics import Typeface
+        from android.view import Gravity
+        from android.widget import FrameLayout, HorizontalScrollView, LinearLayout, ScrollView
+        ctx, dp = self.ctx, dp
+        self.vscroll = ScrollView(ctx)
+        self.vscroll.setVerticalScrollBarEnabled(True)
+        self.hscroll = HorizontalScrollView(ctx)
+        self.hscroll.setHorizontalScrollBarEnabled(True)
+        row = LinearLayout(ctx)
+        row.setOrientation(0)
+        row.setPadding(dp(4), dp(8), dp(16), dp(24))
+
+        self.gutter = label(ctx, "", self.hint_color, 12.0)
+        self.gutter.setTypeface(Typeface.MONOSPACE)
+        self.gutter.setGravity(Gravity.RIGHT)
+        self.gutter.setPadding(dp(6), 0, dp(10), 0)
+        self.code = label(ctx, "", self.text_color, 12.0)
+        self.code.setTypeface(Typeface.MONOSPACE)
+        self.code.setHorizontallyScrolling(True)
+        self.code.setTextIsSelectable(not self.locked)
+        if self.locked:
+            self.code.setLongClickable(False)
+        row.addView(self.gutter, LinearLayout.LayoutParams(-2, -2))
+        row.addView(self.code, LinearLayout.LayoutParams(-2, -2))
+        self.hscroll.addView(row)
+        self.vscroll.addView(self.hscroll, FrameLayout.LayoutParams(-1, -2))
+        self.pane.addView(self.vscroll, FrameLayout.LayoutParams(-1, -1))
+
+        self.hint = label(ctx, tr("ide_pick"), self.hint_color, 15.0)
+        self.hint.setGravity(Gravity.CENTER)
+        self.pane.addView(self.hint, FrameLayout.LayoutParams(-1, -1))
+        self.vscroll.setVisibility(8)
+
+    def build_drawer(self):
+        from android.view import View
+        from android.widget import LinearLayout, ScrollView
+        from android_utils import OnClickListener
+        ctx, dp = self.ctx, dp
+        self.scrim = View(ctx)
+        self.scrim.setBackgroundColor(0x66000000)
+        self.scrim.setClickable(True)
+        self.scrim.setOnClickListener(OnClickListener(lambda v: self.toggle_drawer()))
+        self.scrim.setVisibility(8)
+
+        self.drawer = LinearLayout(ctx)
+        self.drawer.setOrientation(1)
+        self.drawer.setBackgroundColor(self.panel_color)
+        self.drawer.setClickable(True)
+        self.drawer.setVisibility(8)
+        head = label(ctx, tr("ide_files"), self.hint_color, 13.0, medium=True)
+        head.setPadding(dp(16), dp(14), dp(16), dp(6))
+        self.drawer.addView(head, LinearLayout.LayoutParams(-1, -2))
+        scroll = ScrollView(ctx)
+        self.tree_box = LinearLayout(ctx)
+        self.tree_box.setOrientation(1)
+        self.tree_box.setPadding(0, 0, 0, dp(24))
+        scroll.addView(self.tree_box)
+        self.drawer.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1.0))
+
+    def install_back_handler(self, dialog):
+        try:
+            from android.content import DialogInterface
+            from java import dynamic_proxy
+            ide = self
+
+            class CodeViewerBackKeyListener(dynamic_proxy(DialogInterface.OnKeyListener)):
+                def onKey(self, dlg, key_code, event):
+                    if key_code == 4 and event.getAction() == 1:
+                        if ide.drawer_open:
+                            ide.toggle_drawer()
+                        else:
+                            ide.close()
+                        return True
+                    return key_code == 4
+            dialog.setOnKeyListener(CodeViewerBackKeyListener())
+        except Exception:
+            log("warning", traceback.format_exc())
+
+    def close(self):
+        STATE.ide = None
+        self.job += 1
+        if self.dialog is not None:
+            safe(self.dialog.dismiss)
+
+    def toggle_drawer(self):
+        self.drawer_open = not self.drawer_open
+        visibility = 0 if self.drawer_open else 8
+        self.drawer.setVisibility(visibility)
+        self.scrim.setVisibility(visibility)
+
+    def copy_code(self):
+        if self.locked or not self.current_text:
+            return
+        if copy_to_clipboard(self.ctx, self.current_text):
+            notify(tr("ide_copied"))
+
+    def set_status(self, text):
+        self.hint.setText(text)
+        self.hint.setVisibility(0)
+        self.vscroll.setVisibility(8)
+
+    def open_job(self):
+        try:
+            root = open_project(self.path)
+        except Exception as e:
+            log("warning", traceback.format_exc())
+            message = tr("ide_failed", str(e))
+            on_ui(lambda: self.set_status(message))
+            return
+        self.root = root
+        first = self.pick_entry(root)
+        on_ui(lambda: self.project_ready(first))
+
+    @staticmethod
+    def pick_entry(root):
+        stack, first_file = [root], None
+        while stack:
+            node = stack.pop(0)
+            for child in node.children:
+                if child.kind == "file":
+                    if child.name in ("main.py", "__init__.py") or child.name.endswith(".plugin"):
+                        return child
+                    first_file = first_file or child
+                elif child.kind == "dir":
+                    stack.append(child)
+        return first_file
+
+    def project_ready(self, first):
+        self.root.expanded = True
+        self.expand_to(first)
+        self.render_tree()
+        if first is not None:
+            self.open_file(first)
+        else:
+            self.set_status(tr("code_none"))
+            self.toggle_drawer()
+
+    def expand_to(self, target):
+        def walk(node):
+            for child in node.children:
+                if child is target:
+                    return True
+                if child.expandable and walk(child):
+                    child.expanded = True
+                    return True
+            return False
+        if target is not None:
+            walk(self.root)
+
+    def visible_tree_nodes(self):
+        rows = []
+
+        def append_children(node, depth):
+            for child in node.children:
+                rows.append((child, depth))
+                if child.expandable and child.expanded:
+                    append_children(child, depth + 1)
+
+        append_children(self.root, 0)
+        return rows
+
+    def tree_row(self, node, depth):
+        from android.view import Gravity
+        from android.widget import LinearLayout
+        from android_utils import OnClickListener
+
+        ctx, dp = self.ctx, dp
+        row = LinearLayout(ctx)
+        row.setOrientation(0)
+        row.setGravity(Gravity.CENTER_VERTICAL)
+        row.setPadding(dp(12 + depth * 14), dp(9), dp(12), dp(9))
+        row.setClickable(True)
+        selected = node is self.current
+        background = (self.accent & 0x00FFFFFF) | 0x22000000 if selected else 0
+        row.setBackground(ripple(background, self.press, 0))
+
+        mark = ("▾" if node.expanded else "▸") if node.expandable else "•"
+        icon = label(ctx, mark, self.hint_color, 13.0)
+        icon.setGravity(Gravity.CENTER)
+        row.addView(icon, LinearLayout.LayoutParams(dp(18), -2))
+
+        name_color = self.accent if node.expandable else self.text_color
+        name_text = node.name + ("/" if node.kind == "dir" else "")
+        name = label(ctx, name_text, name_color, 14.5,
+                      medium=node.expandable or selected)
+        name.setSingleLine(True)
+        name.setPadding(dp(6), 0, dp(8), 0)
+        row.addView(name, LinearLayout.LayoutParams(0, -2, 1.0))
+        if node.kind != "dir" and node.size:
+            size = label(ctx, human_size(node.size), self.hint_color, 11.5)
+            row.addView(size, LinearLayout.LayoutParams(-2, -2))
+        row.setOnClickListener(OnClickListener(lambda view: self.tap(node)))
+        return row
+
+    def render_tree(self):
+        from android.widget import LinearLayout
+
+        self.tree_box.removeAllViews()
+        rows = self.visible_tree_nodes()
+        if not rows:
+            empty = label(self.ctx, tr("ide_empty"), self.hint_color, 14.0)
+            empty.setPadding(dp(16), dp(8), dp(16), dp(8))
+            self.tree_box.addView(empty)
+            return
+        for node, depth in rows[:1500]:
+            self.tree_box.addView(self.tree_row(node, depth),
+                                  LinearLayout.LayoutParams(-1, -2))
+
+    def tap(self, node):
+        if node.expandable:
+            if node.kind == "archive" and not node.built:
+                try:
+                    expand(node)
+                except Exception as e:
+                    notify(tr("ide_failed", str(e)))
+                    return
+            node.expanded = not node.expanded
+            self.render_tree()
+            return
+        self.toggle_drawer()
+        self.open_file(node)
+
+    def open_file(self, node):
+        self.current = node
+        self.job += 1
+        job = self.job
+        self.title_view.setText(node.name)
+        self.sub_view.setText(tr("ide_loading"))
+        self.set_status(tr("ide_loading"))
+        self.render_tree()
+        threading.Thread(target=self.render_job, args=(node, job), name="extera_more-render",
+                         daemon=True).start()
+
+    def render_job(self, node, job):
+        try:
+            result = render_file(node, self.policy)
+            text = result["text"]
+            spans = color_spans(text, result["lang"])
+            lines = text.count("\n") + 1 if text else 0
+            gutter = "\n".join(str(i) for i in range(1, lines + 1))
+        except Exception as e:
+            log("warning", traceback.format_exc())
+            message = tr("ide_failed", str(e))
+            on_ui(lambda: job == self.job and self.set_status(message))
+            return
+        on_ui(lambda: self.show_result(node, job, result, spans, gutter, lines))
+
+    def show_result(self, node, job, result, spans, gutter, lines):
+        if job != self.job or self.dialog is None:
+            return
+        text = result["text"]
+        try:
+            from android.text import SpannableStringBuilder
+            from android.text.style import ForegroundColorSpan
+            if spans:
+                builder = SpannableStringBuilder(text)
+                for start, end, kind in spans:
+                    builder.setSpan(ForegroundColorSpan(s32(self.palette[kind])), start, end, 33)
+                self.code.setText(builder)
+            else:
+                self.code.setText(text)
+        except Exception:
+            log("warning", traceback.format_exc())
+            self.code.setText(text)
+        self.gutter.setText(gutter)
+        self.current_text = text
+        sub = [tr("ide_lines", lines)]
+        if result["note"]:
+            sub.append(result["note"])
+        if self.locked and self.policy == "review":
+            sub.append(tr("ide_locked"))
+        self.sub_view.setText(" · ".join(sub))
+        self.hint.setVisibility(8)
+        self.vscroll.setVisibility(0)
+        self.vscroll.scrollTo(0, 0)
+        self.hscroll.scrollTo(0, 0)
+
+
+def open_code_viewer(path, title):
+    def run():
+        ctx = activity()
+        if ctx is None:
+            return
+        try:
+            old = STATE.ide
+            if old is not None:
+                old.close()
+            PluginCodeViewer(ctx, path, title).show()
+        except Exception:
+            log("error", traceback.format_exc())
+            notify(tr("ide_failed", "see log"))
+    on_ui(run)
+
+BOTTOM_SHEET = "org.telegram.ui.ActionBar.BottomSheet"
+TAG = "extera_more_perms"
+CODE_WORDS = ("view code", "show code", "source code", "view source", "код", "исходник", "исходн")
+DEX64 =  "ZGV4CjAzNwB1nV/sDUIduSDXoEW14b0vBWetzP6FApiMFAAAcAAAAHhWNBIAAAAAAAAAALwTAABoAAAAcAAAAB4AAAAQAgAAHAAAAIgCAAAHAAAA2AMAACcAAAAQBAAAAgAAAEgFAAAEDwAAiAUAAIYKAACJCgAAjAoAAJAKAACVCgAAmwoAAKMKAACnCgAArQoAALAKAADFCgAA6QoAAAoLAAANCwAAEQsAABULAAAaCwAAHgsAADMLAABYCwAAeAsAAJcLAACzCwAA6wsAABoMAABCDAAAaQwAAH4MAACRDAAApAwAAL0MAADUDAAA9wwAAAsNAAAfDQAANg0AAFENAABtDQAAiQ0AAKANAAC3DQAA1g0AAPUNAAAhDgAASw4AAFEOAABqDgAAbQ4AAHIOAAB2DgAAfQ4AAIEOAACEDgAAiA4AAJwOAACxDgAAzg4AANoOAADnDgAA8A4AAPUOAAAIDwAAHg8AACUPAAArDwAANQ8AAEEPAACKDwAAnA8AAK0PAAC1DwAAwA8AAM8PAADkDwAA6Q8AAPMPAAADEAAAFRAAACkQAAAzEAAAPhAAAEcQAABaEAAAZhAAAH4QAACLEAAAkxAAAJ4QAACjEAAAqRAAAMsQAAD4EAAAEBEAACMRAAAvEQAAPhEAAFkRAABfEQAAaxEAAHMRAAB7EQAAghEAAIsRAACREQAACAAAABEAAAASAAAAEwAAABQAAAAVAAAAFgAAABcAAAAYAAAAGQAAABoAAAAbAAAAHQAAAB4AAAAfAAAAIAAAACEAAAAiAAAAIwAAACQAAAAlAAAAJgAAACgAAAAqAAAAKwAAAC4AAAAzAAAANQAAADYAAAA3AAAACAAAAAAAAAAAAAAADwAAAAcAAAAMCgAAEAAAAAoAAAAUCgAADAAAAAsAAAAAAAAADgAAAAsAAAAcCgAADAAAAAwAAAAAAAAADQAAAA8AAAAkCgAADwAAAA8AAAAsCgAADgAAAA8AAAA0CgAADwAAAA8AAAA8CgAADAAAABAAAAAAAAAADgAAABIAAAAcCgAADgAAABQAAABECgAADwAAABQAAABMCgAADgAAABUAAAA0CgAALgAAABkAAAAAAAAALwAAABkAAABUCgAAMAAAABkAAABcCgAAMAAAABkAAABkCgAAMAAAABkAAAA0CgAAMQAAABkAAABsCgAAMAAAABkAAAAcCgAAMAAAABkAAAB4CgAAMAAAABkAAACACgAAMgAAABkAAAAUCgAANAAAABoAAAA0CgAADAAAABsAAAAAAAAADAAAAB0AAAAAAAAABgAcAD8AAAAGAA8AYQAAAAoACwAsAAAAGAAQAAkAAAAYABAALQAAABgABwBHAAAAGAAWAFsAAAAHAA8AYgAAAAgADwAFAAAACQABAFIAAAAJABYAVwAAAAoAAgBlAAAACwAFAEsAAAALAAsATAAAAAsAGwBNAAAACwALAE4AAAALAA0ATwAAAAsACgBQAAAADAAEAFYAAAAOABUABQAAAA8ADwAFAAAADwADAEoAAAAQABkARQAAABIACABJAAAAEgAYAF4AAAAUAAoAUAAAABQAGgBRAAAAFAAJAFUAAAAUABgAXgAAABUAEAA7AAAAFQAGAEkAAAAVAAAAYAAAABYACAA+AAAAFwAPAAUAAAAXABEAPAAAABgADwAFAAAAGAARADgAAAAYABEAPQAAABgADgBBAAAAGAAHAEMAAAAYAAwASAAAABgAFABTAAAAGAASAFQAAAAYABMAXAAAABgADwBdAAAAGAAXAF8AAAAXAAAAAAAAAAgAAAAAAAAACwAAAFwTAAC3EgAAAAAAABgAAAARAAAADwAAAAAAAAALAAAAbBMAAMUSAAAGEwAAAQABAAEAAACCCQAABAAAAHAQAQAAAA4AAgACAAEAAACGCQAABAAAAHEQHQABAA4ABQACAAMAAACMCQAAGAAAABIQIwAbABIBHAIBAE0CAAEaAUAAbjAJABMADAMSACQQHAAEAAwEbjAUAAMEDAMRAwgAAQACAAAAkwkAAEAAAABuEAcABwAMByFwEgEBEjUCMQBGAwcCbhATAAMADARuEBIAAwAMBRoGRgBuIA8AZQAKBTgFHAAhRRImM2UYAEYFBAEcBhUAM2USABIVRgQEBW4QCgAEAAwEGgVaAG4gDwBUAAoEOAQDABED2AICASjQIgcOABoACgBwIAwABwAnBwEAAQAAAAAAogkAAAMAAAAfABUAEQAAAAEAAQABAAAApwkAAAQAAABwEA0AAAAOAAEAAQABAAAAqwkAAAQAAABxEB4AAAAOAAUAAQAEAAEAsAkAAEIAAABiAAYAOAA/AFRBAAA4ATsAVEEAACEROQEDACg0VEEBAHIgGQAQAAwAHwABADkAAwAOAFRBAQBuEA4AAQAMAW4QBQABAAwBGgJZAG4gCwAhAAwBcSAgAAEADABUQgAAEgNGAgIDcRAfAAIADAJURAEAcUAiABQCKAUNBHEQAwAEAA4ADgAOAAAALQABAAEAPAAIAAQAAwAAAMUJAAA5AAAAbhAOAAQADAAaAUQAbiAGABAADAASEW4gEQAQAG4gEABAAAwEbhAYAAYACgA4BB8AGgJmAG4gCAAlAAwFEgJuEBgABgAKAzUyEgBuIBcAJgAMA24gEAA1AAwDM0MFANgAAgEoBNgCAgEo624wFgAGBw4AAAADAAEAAgADANkJAAAnAAAAHAAYAB0AYgEFADgBBAAeAA4AGgFCAG4gCwASAAwCcRAhAAIADAISEW4gFQASACIBFwBwEBoAAQBxIAIAEgAMAmkCBQAeAA4ADQIeACcCAAADAAAAAgABAAkAAAAZAAEAJQAAAAEAAQABACQABwABAAMAAwDnCQAAOgAAABwAGAAdAG4QDgAGAAwBGgI6AG4gBgAhAAwBEhJuIBEAIQBuIBAAYQAMBjkGBAAeAA4AbhAOAAYADAEaA2MAIyIbAGIEAgASBU0EAgVuMAkAMQIMAXEQBAAFAAwCJBAcAAIADAJuMBQAYQIeAA4ADQYeACcGAwAAABIAAQAZAAAAHAABADgAAAABAAEAAQA3AAMAAAABAAMA+AkAABgAAAAcABgAHQASAWkBBgBiAgUAOQIEAB4ADgBiAgUAbhAAAAIAaQEFAB4ADgANAR4AJwEEAAAABAABAAwAAAAHAAEAFgAAAAEAAQABABUAAQABAAAAAAAECgAAAwAAAGkABgAOACQADgAnAQAOPABpAgAADuEARQEADrRLARkRwwJ6HUQAbwEADgAUAA4ACwEADgBSAQAOLceHLSClaUuWXBsePQJvHQB4BAAAAAAOpUtLTC1peKUtGkI8ABsBADtLL2lLS7sCcCwALQEAO6VMSy0vAREPtAJ1LAA6ADs8Sy9aLQJ4LAAXAQAOLQAAAAIAAAATAAgAAQAAABoAAAABAAAAEAAAAAEAAAAAAAAAAgAAAAsAAQABAAAADwAAAAIAAAAPABwAAQAAAAsAAAACAAAAEAAbAAIAAAAAAA8AAQAAAAYAAAABAAAADAAAAAQAAAAPAAsAFQAPAAEAAAARAAAAAQAAABYAASgAASkAAilWAAMqPjsABCo+OykABjxpbml0PgACPjsABD47KVYAAUkAE0lOU1RBTExfU0hFRVRfQ0xBU1MAIkluc3RhbGxQbHVnaW5Cb3R0b21TaGVldC5maWxsSXRlbXMAH0luc3RhbGxTaGVldFBlcm1pc3Npb25Ib29rLmphdmEAAUwAAkxJAAJMTAADTExMAAJMWgATTGFuZHJvaWQvdmlldy9WaWV3OwAjTGRhbHZpay9hbm5vdGF0aW9uL0VuY2xvc2luZ01ldGhvZDsAHkxkYWx2aWsvYW5ub3RhdGlvbi9Jbm5lckNsYXNzOwAdTGRhbHZpay9hbm5vdGF0aW9uL1NpZ25hdHVyZTsAGkxkYWx2aWsvYW5ub3RhdGlvbi9UaHJvd3M7ADZMZGUvcm9idi9hbmRyb2lkL3hwb3NlZC9YQ19NZXRob2RIb29rJE1ldGhvZEhvb2tQYXJhbTsALUxkZS9yb2J2L2FuZHJvaWQveHBvc2VkL1hDX01ldGhvZEhvb2skVW5ob29rOwAmTGRlL3JvYnYvYW5kcm9pZC94cG9zZWQvWENfTWV0aG9kSG9vazsAJUxkZS9yb2J2L2FuZHJvaWQveHBvc2VkL1hwb3NlZEJyaWRnZTsAE0xqYXZhL2xhbmcvQm9vbGVhbjsAEUxqYXZhL2xhbmcvQ2xhc3M7ABFMamF2YS9sYW5nL0NsYXNzPAAXTGphdmEvbGFuZy9DbGFzc0xvYWRlcjsAFUxqYXZhL2xhbmcvRXhjZXB0aW9uOwAhTGphdmEvbGFuZy9Ob1N1Y2hNZXRob2RFeGNlcHRpb247ABJMamF2YS9sYW5nL09iamVjdDsAEkxqYXZhL2xhbmcvU3RyaW5nOwAVTGphdmEvbGFuZy9UaHJvd2FibGU7ABlMamF2YS9sYW5nL3JlZmxlY3QvRmllbGQ7ABpMamF2YS9sYW5nL3JlZmxlY3QvTWVtYmVyOwAaTGphdmEvbGFuZy9yZWZsZWN0L01ldGhvZDsAFUxqYXZhL3V0aWwvQXJyYXlMaXN0OwAVTGphdmEvdXRpbC9BcnJheUxpc3Q8AB1MamF2YS91dGlsL2Z1bmN0aW9uL0Z1bmN0aW9uOwAdTGphdmEvdXRpbC9mdW5jdGlvbi9GdW5jdGlvbjwAKkxuaWtvZGV2L2RleC9JbnN0YWxsU2hlZXRQZXJtaXNzaW9uSG9vayQxOwAoTG5pa29kZXYvZGV4L0luc3RhbGxTaGVldFBlcm1pc3Npb25Ib29rOwAEVFlQRQAXVU5JVkVSU0FMX0FEQVBURVJfQ0xBU1MAAVYAA1ZJTAACVkwABVZMTExMAAJWWgABWgACWkwAEltMamF2YS9sYW5nL0NsYXNzOwATW0xqYXZhL2xhbmcvT2JqZWN0OwAbW0xqYXZhL2xhbmcvcmVmbGVjdC9NZXRob2Q7AAphY2Nlc3MkMDAwAAthY2Nlc3NGbGFncwAHYWRhcHRlcgADYWRkABFhZnRlckhvb2tlZE1ldGhvZAAUYXBwZW5kUGVybWlzc2lvbkl0ZW0ABWFwcGx5AARhcmdzAAhhc0N1c3RvbQAKYXNJdGVtTGlzdABHY29tLmV4dGVyYWdyYW0ubWVzc2VuZ2VyLnBsdWdpbnMudWkuY29tcG9uZW50cy5JbnN0YWxsUGx1Z2luQm90dG9tU2hlZXQAEGNyZWF0ZUN1c3RvbUl0ZW0AD2Rlc2NyaXB0aW9uVmlldwAGZXF1YWxzAAlmaWxsSXRlbXMADWZpbGxJdGVtc0hvb2sAE2ZpbmRGaWxsSXRlbXNNZXRob2QAA2dldAAIZ2V0Q2xhc3MADmdldENsYXNzTG9hZGVyABBnZXREZWNsYXJlZEZpZWxkABJnZXREZWNsYXJlZE1ldGhvZHMACGdldEZpZWxkAAlnZXRNZXRob2QAB2dldE5hbWUAEWdldFBhcmFtZXRlclR5cGVzAApob29rTWV0aG9kABZpbnNlcnRBZnRlckRlc2NyaXB0aW9uAAtpbnN0YWxsSG9vawAGaW52b2tlAAlsb2FkQ2xhc3MAA2xvZwAEbmFtZQAgb3JnLnRlbGVncmFtLnVpLkNvbXBvbmVudHMuVUl0ZW0AK29yZy50ZWxlZ3JhbS51aS5Db21wb25lbnRzLlVuaXZlcnNhbEFkYXB0ZXIAFnBlcm1pc3Npb25WaWV3UHJvdmlkZXIAEXJlZnJlc2hTaGVldEl0ZW1zAApyZW1vdmVIb29rAA1zZXRBY2Nlc3NpYmxlABlzZXRQZXJtaXNzaW9uVmlld1Byb3ZpZGVyAARzaXplAAp0aGlzT2JqZWN0AAZ1bmhvb2sABnVwZGF0ZQAFdmFsdWUAB3ZhbHVlT2YABHZpZXcAnQF+fkQ4eyJiYWNrZW5kIjoiZGV4IiwiY29tcGlsYXRpb24tbW9kZSI6ImRlYnVnIiwiaGFzLWNoZWNrc3VtcyI6ZmFsc2UsIm1pbi1hcGkiOjI0LCJzaGEtMSI6ImE3YWQxOGE3MDQ2MGI3OTlkMDQ4MmU0OTdjMTA5YTc1YmY3ZjkxZGUiLCJ2ZXJzaW9uIjoiOC4xMC45LWRldiJ9AAICAWQaIwIDAjkEAFgeAgQBZBwFFwAXKRcgFyAXBwIFAWQcARgNAgQBZBwEFwAXHBcEFyUCBQFkHAEYDgIEAWQcBhcAFxwXAxcRFwEXIAIEAWQcBhcAFyAXARcnFyAXBgIEAWQcCRcAFyAXHBcDFycXIBcGFyAXAgIEAWQcBBcpFyAXIBcGAAABARqAgASICxsBoAsEAAsAAxoBGgEKAUocgoAEoA0BiCC4DQEK0A0BCogNAQq4CwEK+AsBCvAOAYmACPQPAYmACPAQAYmACJASAQnsEgIXQhdaAAIAAAAxEgAANxIAAAEAAAA/EgAAAQAAAE8SAAACAAAAVxIAAGUSAAACAAAAbRIAAE8SAAABAAAAfxIAAAIAAACREgAATxIAAAEAAACpEgAADBMAAAAAAAAAAAAAAAAAAAAAAAABAAAABwAAAAAAAAAGAAAAVBMAAB8AAABAEwAAIAAAADQTAAAhAAAAKBMAACIAAABIEwAAIwAAACATAAAkAAAAIBMAACYAAAAYEwAAEQAAAAAAAAABAAAAAAAAAAEAAABoAAAAcAAAAAIAAAAeAAAAEAIAAAMAAAAcAAAAiAIAAAQAAAAHAAAA2AMAAAUAAAAnAAAAEAQAAAYAAAACAAAASAUAAAEgAAANAAAAiAUAAAMgAAANAAAAggkAAAEQAAAPAAAADAoAAAIgAABoAAAAhgoAAAQgAAAKAAAAMRIAAAAgAAACAAAAtxIAAAUgAAABAAAABhMAAAMQAAAIAAAADBMAAAYgAAACAAAAXBMAAAAQAAABAAAAvBMAAA=="
+
+
+def extends_sheet(cls):
+    sup = cls.getSuperclass()
+    while sup is not None:
+        if str(sup.getName()) == BOTTOM_SHEET:
+            return True
+        sup = sup.getSuperclass()
+    return False
+
+
+def hook_install_sheets(names):
+    ctors = 0
+    for cname in names:
+        if "install" not in cname.lower():
+            continue
+        cls = jc(cname)
+        if cls is None or not extends_sheet(cls):
+            continue
+        for ctor in cls.getDeclaredConstructors():
+            try:
+                if hook_method(ctor, after=on_sheet_created):
+                    ctors += 1
+            except Exception:
+                log("warning", traceback.format_exc())
+    base = jc(BOTTOM_SHEET)
+    if base is not None:
+        try:
+            show = base.getDeclaredMethod("show")
+            hook_method(show, before=on_sheet_show_before, after=None if ctors else on_sheet_shown)
+        except Exception:
+            log("warning", traceback.format_exc())
+
+
+def show_spinner():
+    try:
+        ctx = activity()
+        if ctx is None:
+            return None
+        from ui.alert import AlertDialogBuilder
+        builder = AlertDialogBuilder(ctx, AlertDialogBuilder.ALERT_TYPE_SPINNER)
+        builder.show()
+        builder.set_cancelable(False)
+        return builder
+    except Exception:
+        log("warning", traceback.format_exc())
+        return None
+
+
+def close_spinner(box):
+    builder = box[0] if box else None
+    if builder is not None:
+        on_ui(lambda: safe(builder.dismiss))
+
+
+def sheet_key(sheet):
+    from java.lang import System
+    return int(System.identityHashCode(sheet))
+
+
+def begin_check(sheet, key=None, spinner=True):
+    box = []
+    ready = threading.Event()
+
+    def begin():
+        try:
+            if spinner:
+                box.append(show_spinner())
+        finally:
+            ready.set()
+    on_ui(begin)
+    threading.Thread(target=check_job, args=(sheet, box, ready, key),
+                     name="extera_more-check", daemon=True).start()
+
+
+def start_inject(sheet):
+    key = sheet_key(sheet)
+    now = time.time()
+    if now - STATE.injected.get(key, 0.0) < 600:
+        return
+    STATE.injected = {k: t for k, t in STATE.injected.items() if now - t < 600}
+    STATE.injected[key] = now
+    if STATE.on:
+        begin_check(sheet)
+    else:
+        badge_only(sheet, 0)
+        begin_check(sheet, spinner=False)
+
+
+def badge_only(sheet, tries):
+    root = sheet_root(sheet)
+    if root is None or not cfg("hide_trust_badge", True):
+        return
+    if hide_trust_badge(root) or tries >= 12:
+        return
+    later(lambda: badge_only(sheet, tries + 1), 80)
+
+
+def check_job(sheet, box, ready, key=None):
+    info = None
+    try:
+        ready.wait(2.0)
+        time.sleep(0.25)
+        deadline = time.monotonic() + 3.0
+        path = None
+        while STATE.alive:
+            path = resolve_install_path(sheet)
+            if path or time.monotonic() > deadline:
+                break
+            time.sleep(0.1)
+        if path:
+            info = scan_file(path)
+            save_scan_cache()
+    except Exception:
+        log("warning", traceback.format_exc())
+    on_ui(lambda: finish_inject(sheet, info, box, 0, key))
+
+
+def finish_inject(sheet, info, box, tries, key=None):
+    try:
+        done = inject_sheet(sheet, info, tries)
+    except Exception:
+        log("warning", traceback.format_exc())
+        done = True
+    if key is not None and (done or tries >= 6):
+        release(sheet, key, box)
+        key, box = None, None
+    if done:
+        close_spinner(box)
+        return
+    later(lambda: finish_inject(sheet, info, box, tries + 1, key), 100)
+
+
+def on_sheet_created(param):
+    try:
+        sheet = param.thisObject
+        if STATE.on:
+            if len(STATE.gated) > 16:
+                STATE.gated.clear()
+                STATE.started.clear()
+            STATE.gated.add(sheet_key(sheet))
+        else:
+            start_inject(sheet)
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def on_sheet_show_before(param):
+    try:
+        if not STATE.gated:
+            return
+        sheet = param.thisObject
+        key = sheet_key(sheet)
+        if key not in STATE.gated:
+            return
+        param.setResult(None)
+        if key in STATE.started:
+            return
+        STATE.started.add(key)
+        begin_check(sheet, key)
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def release(sheet, key, box):
+    close_spinner(box)
+    STATE.gated.discard(key)
+    STATE.started.discard(key)
+    on_ui(lambda: safe(sheet.show))
+
+
+def on_sheet_shown(param):
+    try:
+        sheet = param.thisObject
+        if "plugin" not in str(sheet.getClass().getName()).lower():
+            return
+        start_inject(sheet)
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def path_text(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value
+    else:
+        getter = getattr(value, "getAbsolutePath", None) or getattr(value, "getPath", None)
+        if getter is None:
+            return None
+        try:
+            text = str(getter())
+        except Exception:
+            return None
+    if text.startswith("file://"):
+        text = text[7:]
+    return text
+
+
+def is_plugin_path_candidate(text):
+    if not text.startswith("/"):
+        return False
+    try:
+        if os.path.isdir(text):
+            return any(os.path.exists(os.path.join(text, name)) for name in REFMAP_NAMES)
+        if not os.path.isfile(text):
+            return False
+        lower = text.lower()
+        if lower.endswith(PLUGIN_EXT) or lower.endswith(ARCHIVE_EXT):
+            return True
+        return os.path.getsize(text) <= 2000000 or zipfile.is_zipfile(text)
+    except OSError:
+        return False
+
+
+def as_plugin_path(value):
+    text = path_text(value)
+    if text is None or not is_plugin_path_candidate(text):
+        return None
+    info = scan_file(text)
+    return text if info and info.get("has_id") else None
+
+
+def find_path(obj, depth=2, seen=None):
+    direct = as_plugin_path(obj)
+    if direct or obj is None or depth < 0 or isinstance(obj, (str, int, float, bool)):
+        return direct
+    seen = seen if seen is not None else set()
+    try:
+        key = int(obj.hashCode())
+        cls = obj.getClass()
+    except Exception:
+        return None
+    if key in seen:
+        return None
+    seen.add(key)
+    nested = []
+    stop = ("java.lang.Object", "android.app.Dialog", BOTTOM_SHEET)
+    while cls is not None and str(cls.getName()) not in stop:
+        for fld in cls.getDeclaredFields():
+            try:
+                if fld.getModifiers() & 8:
+                    continue
+                fld.setAccessible(True)
+                val = fld.get(obj)
+            except Exception:
+                continue
+            if val is None:
+                continue
+            found = as_plugin_path(val)
+            if found:
+                return found
+            if str(fld.getType().getName()).startswith("com.exteragram."):
+                nested.append(val)
+        time.sleep(0.002)
+        cls = cls.getSuperclass()
+    for val in nested:
+        found = find_path(val, depth - 1, seen)
+        if found:
+            return found
+    return None
+
+
+def resolve_install_path(sheet):
+    try:
+        sid = sheet_key(sheet)
+    except Exception:
+        sid = None
+    path = STATE.sheet_paths.get(sid)
+    if path:
+        return path
+    if STATE.install_args and time.time() - STATE.install_seen_at < 30:
+        for arg in list(STATE.install_args):
+            try:
+                path = find_path(arg, 1)
+            except Exception:
+                path = None
+            if path:
+                break
+    if not path:
+        try:
+            path = find_path(sheet, 2)
+        except Exception:
+            log("warning", traceback.format_exc())
+    if path and sid is not None:
+        if len(STATE.sheet_paths) > 16:
+            STATE.sheet_paths.clear()
+        STATE.sheet_paths[sid] = path
+    return path
+
+
+def kids(view):
+    try:
+        return [view.getChildAt(i) for i in range(view.getChildCount())]
+    except Exception:
+        return []
+
+
+def cname(view):
+    try:
+        return str(view.getClass().getName())
+    except Exception:
+        return ""
+
+
+def view_text(view):
+    try:
+        text = view.getText()
+        return "" if text is None else str(text)
+    except Exception:
+        return ""
+
+
+def sheet_root(sheet):
+    try:
+        return sheet.containerView
+    except Exception:
+        pass
+    try:
+        fld = jc(BOTTOM_SHEET).getDeclaredField("containerView")
+        fld.setAccessible(True)
+        return fld.get(sheet)
+    except Exception:
+        return None
+
+
+def walk_view_tree(view, depth=0):
+    yield view, depth
+    for child in kids(view):
+        yield from walk_view_tree(child, depth + 1)
+
+
+def is_vertical_linear(view):
+    try:
+        return "LinearLayout" in cname(view) and view.getOrientation() == 1
+    except Exception:
+        return False
+
+
+def snapshot(root):
+    return [(view, cname(view)) for view, depth in walk_view_tree(root)]
+
+
+def find_button(snap):
+    return next((v for v, c in snap if "ButtonWithCounter" in c), None) \
+        or next((v for v, c in snap if c.endswith("Button")), None)
+
+
+def find_slot(root, snap=None):
+    snap = snapshot(root) if snap is None else snap
+    button = find_button(snap)
+    node = button
+    while node is not None and node is not root:
+        parent = node.getParent()
+        if parent is not None and is_vertical_linear(parent):
+            return parent, parent.indexOfChild(node)
+        node = parent
+    if button is not None:
+        return None
+    best = [v for v, c in snap if "LinearLayout" in c and is_vertical_linear(v)]
+    return (max(best, key=lambda v: v.getChildCount()), -1) if best else None
+
+
+
+
+
+def find_code_button(snap):
+    for view, cname in snap:
+        if "Text" not in cname and not cname.endswith("Button"):
+            continue
+        text = view_text(view).strip().lower()
+        if text and len(text) <= 40 and any(word in text for word in CODE_WORDS):
+            return view
+    return None
+
+
+def rewire_code_button(button, path, name):
+    from android_utils import OnClickListener
+
+    def open_ide(view=None):
+        open_code_viewer(path, name)
+
+    listener = OnClickListener(open_ide)
+    targets = [button]
+    node = button
+    for parent_depth in range(3):
+        node = node.getParent()
+        if node is None:
+            break
+        try:
+            if node.isClickable():
+                targets.append(node)
+        except Exception:
+            break
+    for target in targets:
+        safe(lambda t=target: t.setOnClickListener(listener))
+    return True
+
+
+def stage_grants(pid, perms):
+    if pid not in STATE.plugin_infos:
+        STATE.provisional.add(pid)
+    set_grants(pid, perms)
+
+
+def cleanup_provisional():
+    live = set(scan_all())
+    with STATE.lock:
+        for pid in list(STATE.provisional):
+            if pid not in live:
+                STATE.grants.pop(pid, None)
+            STATE.provisional.discard(pid)
+        save_grants()
+
+
+def arm_cleanup():
+    old = STATE.cleanup_timer
+    if old is not None:
+        old.cancel()
+    timer = threading.Timer(900.0, cleanup_provisional)
+    timer.daemon = True
+    timer.start()
+    STATE.cleanup_timer = timer
+
+
+def make_check(ctx, checked):
+    try:
+        from org.telegram.ui.Components import CheckBox2
+        box = CheckBox2(ctx, 24)
+        try:
+            from org.telegram.ui.ActionBar import Theme
+            box.setColor(Theme.key_dialogRoundCheckBox, Theme.key_checkboxDisabled,
+                         Theme.key_dialogRoundCheckBoxCheck)
+        except Exception:
+            pass
+        try:
+            box.setDrawUnchecked(True)
+        except Exception:
+            pass
+        box.setChecked(checked, False)
+        return box, 24, lambda v: box.setChecked(v, True)
+    except Exception:
+        from android.widget import CheckBox
+        box = CheckBox(ctx)
+        box.setChecked(checked)
+        box.setClickable(False)
+        return box, -2, lambda v: box.setChecked(v)
+
+
+def permission_block_colors():
+    accent = theme_color("key_dialogTextBlue", -13134875)
+    red = theme_color("key_text_RedBold", -2937041)
+    return {
+        "text": theme_color("key_dialogTextBlack", -16777216),
+        "hint": theme_color("key_dialogTextGray2", -7829368),
+        "card": theme_color("key_dialogBackgroundGray", 0x14808080),
+        "line": theme_color("key_divider", 0x22808080),
+        "red": red,
+        "accent": accent,
+        "press": theme_color("key_listSelector", 0x1F808080),
+        "danger_bg": s32((red & 0x00FFFFFF) | 0x1A000000),
+        "pill_bg": s32((accent & 0x00FFFFFF) | 0x26000000),
+    }
+
+
+def permission_header(ctx, outer, requested, chosen, colors):
+    from android.view import Gravity
+    from android.widget import LinearLayout
+
+    head = LinearLayout(ctx)
+    head.setOrientation(0)
+    head.setGravity(Gravity.CENTER_VERTICAL)
+    head.setPadding(dp(4), dp(4), dp(4), dp(10))
+    head.addView(label(ctx, tr("sheet_title"), colors["text"], 18.0, medium=True),
+                 LinearLayout.LayoutParams(0, -2, 1.0))
+    count = label(ctx, "", colors["accent"], 13.0, medium=True)
+    count.setPadding(dp(10), dp(3), dp(10), dp(3))
+    count.setBackground(round_bg(colors["pill_bg"], 12))
+    head.addView(count, LinearLayout.LayoutParams(-2, -2))
+    outer.addView(head, LinearLayout.LayoutParams(-1, -2))
+
+    def refresh_count():
+        count.setText("%d / %d" % (len(set(chosen) & set(requested)), len(requested)))
+
+    refresh_count()
+    return refresh_count
+
+
+def permission_row_control(row, ctx, perm, chosen):
+    from android.widget import LinearLayout
+
+    control, size, setter = make_check(ctx, perm in chosen)
+    side = dp(size) if size > 0 else size
+    row.addView(control, LinearLayout.LayoutParams(side, side))
+    return setter
+
+
+def permission_row_labels(ctx, name, sub, colors, perm, danger):
+    from android.widget import LinearLayout
+
+    texts = LinearLayout(ctx)
+    texts.setOrientation(1)
+    texts.setPadding(dp(16) if perm is not None else 0, 0, 0, 0)
+    name_color = colors["red"] if danger else colors["text"]
+    sub_color = colors["red"] if danger else colors["hint"]
+    texts.addView(label(ctx, name, name_color, 15.5, medium=True))
+    sub_view = label(ctx, sub, sub_color, 13.0)
+    sub_view.setPadding(0, dp(2), 0, 0)
+    texts.addView(sub_view)
+    return texts
+
+
+def toggle_permission(pid, perm, chosen, setter, refresh_count):
+    enabled = perm not in chosen
+    if enabled:
+        chosen.add(perm)
+    else:
+        chosen.discard(perm)
+    stage_grants(pid, chosen)
+    refresh_count()
+    setter(enabled)
+
+
+def prevent_parent_scroll_intercept(view, release_cancel=True):
+    from android.view import View
+    from java import dynamic_proxy
+
+    class PermissionScrollListener(dynamic_proxy(View.OnTouchListener)):
+        def onTouch(self, touched_view, event):
+            action = event.getAction()
+            parent = touched_view.getParent()
+            recycler = None
+            while parent is not None:
+                parent_name = cname(parent)
+                if "RecyclerView" in parent_name or "RecyclerListView" in parent_name:
+                    recycler = parent
+                    break
+                parent = parent.getParent()
+            if recycler is None:
+                return False
+            if action in (0, 2):
+                recycler.requestDisallowInterceptTouchEvent(True)
+            elif action == 1 or (action == 3 and release_cancel):
+                recycler.requestDisallowInterceptTouchEvent(False)
+            return False
+
+    listener = PermissionScrollListener()
+    view.setOnTouchListener(listener)
+    return listener
+
+
+def permission_row(card, ctx, pid, chosen, name, sub, colors, refresh_count,
+                    perm=None, danger=False):
+    from android.view import Gravity
+    from android.widget import LinearLayout
+    from android_utils import OnClickListener
+
+    dp = dp
+    row = LinearLayout(ctx)
+    row.setOrientation(0)
+    row.setGravity(Gravity.CENTER_VERTICAL)
+    row.setPadding(dp(10 if danger else 16), dp(12), dp(10 if danger else 16), dp(12))
+    row.setClickable(True)
+    row.setBackground(ripple(colors["danger_bg"] if danger else 0, colors["press"],
+                              14 if danger else 0))
+    prevent_parent_scroll_intercept(row, release_cancel=False)
+    setter = permission_row_control(row, ctx, perm, chosen) if perm is not None else None
+    labels = permission_row_labels(ctx, name, sub, colors, perm, danger)
+    row.addView(labels, LinearLayout.LayoutParams(0, -2, 1.0))
+
+    if perm is not None:
+        on_toggle = lambda view: toggle_permission(
+            pid, perm, chosen, setter, refresh_count)
+        row.setOnClickListener(OnClickListener(on_toggle))
+
+    params = LinearLayout.LayoutParams(-1, -2)
+    if danger:
+        params.setMargins(dp(6), dp(4), dp(6), dp(4))
+    card.addView(row, params)
+
+
+def add_permission_divider(card, ctx, color):
+    from android.view import View
+    from android.widget import LinearLayout
+
+    line = View(ctx)
+    line.setBackgroundColor(color)
+    params = LinearLayout.LayoutParams(-1, 1)
+    params.leftMargin = dp(56)
+    card.addView(line, params)
+
+
+def permission_rows(card, ctx, pid, requested, chosen, colors, refresh_count,
+                     scan_complete=True):
+    if not scan_complete:
+        permission_row(
+            card,
+            ctx,
+            pid,
+            chosen,
+            tr("scan_incomplete"),
+            tr("scan_incomplete_detail"),
+            colors,
+            refresh_count,
+        )
+        add_permission_divider(card, ctx, colors["line"])
+    if not requested:
+        permission_row(card, ctx, pid, chosen, tr("none"), tr("perm_none_s"),
+                        colors, refresh_count)
+        return
+
+    for index, perm in enumerate(requested):
+        danger = perm in DANGEROUS
+        if index and not danger and requested[index - 1] not in DANGEROUS:
+            add_permission_divider(card, ctx, colors["line"])
+        permission_row(card, ctx, pid, chosen, tr("perm." + perm), tr("permd." + perm),
+                        colors, refresh_count, perm, danger)
+
+
+def permission_code_button(ctx, outer, code_target, colors):
+    from android.view import Gravity
+    from android.widget import LinearLayout
+    from android_utils import OnClickListener
+
+    button = label(ctx, tr("view_code"), colors["accent"], 15.0, medium=True)
+    button.setGravity(Gravity.CENTER)
+    button.setClickable(True)
+    button.setBackground(ripple(colors["pill_bg"], colors["press"], 12))
+    path, name = code_target
+    button.setOnClickListener(OnClickListener(lambda view: open_code_viewer(path, name)))
+    params = LinearLayout.LayoutParams(-1, dp(46))
+    params.topMargin = dp(10)
+    outer.addView(button, params)
+
+
+def permission_scroll_height(requested_count):
+    try:
+        from org.telegram.messenger import AndroidUtilities
+        screen_height = int(AndroidUtilities.displaySize.y)
+        max_height = int(screen_height * 0.42)
+    except Exception:
+        max_height = dp(300)
+    return min(max_height, dp(max(1, requested_count) * 88))
+
+
+def permission_scroll(ctx, pid, info, chosen, colors, refresh_count):
+    from android.widget import LinearLayout, ScrollView
+
+    scroll = ScrollView(ctx)
+    scroll.setVerticalScrollBarEnabled(True)
+    scroll.setFillViewport(False)
+    scroll.setNestedScrollingEnabled(False)
+    scroll.setVerticalFadingEdgeEnabled(True)
+    scroll.setFadingEdgeLength(dp(24))
+    rows = LinearLayout(ctx)
+    rows.setOrientation(1)
+    rows.setBackground(round_bg(colors["card"], 16))
+    try:
+        rows.setClipToOutline(True)
+    except Exception:
+        pass
+    permission_rows(
+        rows,
+        ctx,
+        pid,
+        list(info["requested"]),
+        chosen,
+        colors,
+        refresh_count,
+        info.get("scan_complete", True),
+    )
+    scroll.addView(rows)
+    prevent_parent_scroll_intercept(scroll)
+    params = LinearLayout.LayoutParams(
+        -1, permission_scroll_height(len(info["requested"])))
+    return scroll, params
+
+
+def build_block(ctx, pid, info, chosen, code_target=None):
+    from android.widget import LinearLayout
+
+    dp = dp
+    requested = list(info["requested"])
+    colors = permission_block_colors()
+
+    outer = LinearLayout(ctx)
+    outer.setOrientation(1)
+    outer.setTag(TAG)
+    outer.setPadding(dp(16), dp(8), dp(16), dp(12))
+    refresh_count = permission_header(ctx, outer, requested, chosen, colors)
+    scroll, scroll_params = permission_scroll(ctx, pid, info, chosen, colors, refresh_count)
+    outer.addView(scroll, scroll_params)
+    if code_target is not None:
+        permission_code_button(ctx, outer, code_target, colors)
+
+    note = label(ctx, tr("perm_hint"), colors["hint"], 12.5)
+    note.setPadding(dp(8), dp(12), dp(8), dp(2))
+    note.setLineSpacing(0.0, 1.1)
+    outer.addView(note, LinearLayout.LayoutParams(-1, -2))
+    return outer
+
+
+def is_badge_text(text):
+    t = text.strip().lower()
+    if not t or len(t) > 120:
+        return False
+    if any(w in t for w in ("доверен", "ненадёж", "ненадеж", "trusted")):
+        return True
+    return (("источник" in t and any(w in t for w in ("неизвест", "непровер", "провер")))
+            or ("source" in t and any(w in t for w in ("unknown", "unverified", "not verified"))))
+
+
+def hide_trust_badge(root, snap=None):
+    try:
+        snap = snapshot(root) if snap is None else snap
+        button = find_button(snap)
+        hidden = 0
+        for view, cname in snap:
+            if "Text" not in cname or not is_badge_text(view_text(view)):
+                continue
+            target = view
+            for parent_depth in range(3):
+                parent = target.getParent()
+                if parent is None or parent is root or not hasattr(parent, "getChildCount") \
+                        or parent.getChildCount() > 4:
+                    break
+                inside = [child for child, depth in walk_view_tree(parent)]
+                if any(x is button for x in inside):
+                    break
+                if any(t.strip() and not is_badge_text(t) for t in map(view_text, inside)):
+                    break
+                target = parent
+            if target.getVisibility() != 8:
+                target.setVisibility(8)
+                hidden += 1
+        return hidden
+    except Exception:
+        log("warning", traceback.format_exc())
+        return 0
+
+
+def initial_choice(info):
+    existing = STATE.grants.get(info["id"])
+    requested = info["requested"]
+    if existing is not None:
+        return set(existing) & set(requested)
+    return {p for p in requested if p not in DANGEROUS}
+
+
+def install_perm_dialog(pid, info, chosen):
+    requested = info["requested"]
+
+    def show():
+        ctx = activity()
+        if ctx is None or not requested:
+            return
+        from ui.alert import AlertDialogBuilder
+        items = [("✓ " if p in chosen else "✗ ") + tr("perm." + p) + (" ⚠" if p in DANGEROUS else "")
+                 for p in requested]
+
+        def toggle(builder, which):
+            perm = requested[which]
+            if perm in chosen:
+                chosen.discard(perm)
+            else:
+                chosen.add(perm)
+            stage_grants(pid, chosen)
+            builder.dismiss()
+            install_perm_dialog(pid, info, chosen)
+
+        AlertDialogBuilder(ctx).set_title("%s: %s" % (tr("sheet_title"), info["name"])) \
+            .set_items(items, toggle).set_positive_button(tr("close")).show()
+    on_ui(show)
+
+
+def sheet_layout(root):
+    try:
+        snapshot = snapshot(root)
+        return snapshot, find_slot(root, snapshot)
+    except Exception:
+        log("warning", traceback.format_exc())
+        return None, None
+
+
+def sheet_code_target(info, snapshot):
+    if info.get("kind") != "elyx":
+        return None
+    button = find_code_button(snapshot) if snapshot else None
+    if button is not None and rewire_code_button(button, info["path"], info["name"]):
+        return None
+    return info["path"], info["name"]
+
+
+def dex_permission_view(sheet):
+    state = STATE.dex_permissions.get(sheet_key(sheet))
+    if state is None:
+        return None
+    info, chosen, code_target = state
+    try:
+        if not STATE.on:
+            return build_code_only(sheet.getContext(), info) if code_target else None
+        return build_block(sheet.getContext(), info["id"], info, chosen, code_target)
+    except Exception:
+        log("error", traceback.format_exc())
+        if STATE.on:
+            on_ui(lambda: install_perm_dialog(info["id"], info, chosen))
+        return None
+
+
+def dex_method(bridge, name, parameter_count):
+    for method in bridge.getMethods():
+        if (
+            str(method.getName()) == name
+            and len(method.getParameterTypes()) == parameter_count
+        ):
+            return method
+    raise LookupError("DEX method is missing: %s" % name)
+
+
+def install_dex_bridge():
+    try:
+        from java import dynamic_proxy
+        from java.nio import ByteBuffer
+        from java.util.function import Function
+        from dalvik.system import InMemoryDexClassLoader
+        from org.telegram.messenger import ApplicationLoader
+
+        app_loader = ApplicationLoader.applicationContext.getClassLoader()
+        loader = InMemoryDexClassLoader(
+            ByteBuffer.wrap(base64.b64decode(DEX64)), app_loader)
+        bridge = loader.loadClass("nikodev.dex.InstallSheetPermissionHook")
+
+        class InstallPermissionViewProvider(dynamic_proxy(Function)):
+            def apply(self, sheet):
+                return dex_permission_view(sheet)
+
+        provider = InstallPermissionViewProvider()
+        dex_method(bridge, "setPermissionViewProvider", 1).invoke(None, provider)
+        dex_method(bridge, "installHook", 1).invoke(None, app_loader)
+        STATE.dex_loader = loader
+        STATE.dex_provider = provider
+        return bridge
+    except Exception:
+        log("error", traceback.format_exc())
+        return None
+
+
+def refresh_dex_sheet(sheet):
+    bridge = STATE.dex_bridge
+    if bridge is None:
+        return
+    try:
+        dex_method(bridge, "refreshSheetItems", 1).invoke(None, sheet)
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def add_sheet_block(sheet, slot, pid, info, chosen, code_target):
+    from android.widget import LinearLayout
+
+    try:
+        block = build_block(sheet.getContext(), pid, info, chosen, code_target)
+    except Exception:
+        log("error", traceback.format_exc())
+        block = None
+        if STATE.on:
+            install_perm_dialog(pid, info, chosen)
+    if not STATE.on:
+        block = build_code_only(sheet.getContext(), info) if code_target else None
+    if block is None:
+        return
+
+    parent, index = slot
+    insert_at = index if index >= 0 else parent.getChildCount()
+    parent.addView(block, insert_at, LinearLayout.LayoutParams(-1, -2))
+    parent.requestLayout()
+    parent.invalidate()
+
+
+def inject_sheet_permissions(sheet, snapshot, slot, info):
+    pid = info["id"]
+    chosen = initial_choice(info)
+    if STATE.on:
+        stage_grants(pid, chosen)
+    if STATE.dex_bridge is not None:
+        sid = sheet_key(sheet)
+        if len(STATE.dex_permissions) >= 16:
+            STATE.dex_permissions.clear()
+        code_target = sheet_code_target(info, None)
+        STATE.dex_permissions[sid] = (info, chosen, code_target)
+        refresh_dex_sheet(sheet)
+        return True
+    if slot is None:
+        if STATE.on:
+            install_perm_dialog(pid, info, chosen)
+        return False
+    code_target = sheet_code_target(info, snapshot)
+    add_sheet_block(sheet, slot, pid, info, chosen, code_target)
+    return True
+
+
+def inject_sheet(sheet, info, tries):
+    root = sheet_root(sheet)
+    hide = bool(cfg("hide_trust_badge", True))
+    if info is None:
+        if hide and root is not None:
+            hide_trust_badge(root)
+        return True
+    snapshot = slot = None
+    dex_mode = STATE.dex_bridge is not None
+    if root is not None:
+        try:
+            if root.findViewWithTag(TAG) is not None:
+                return True
+        except Exception:
+            log("warning", traceback.format_exc())
+        if not dex_mode:
+            snapshot, slot = sheet_layout(root)
+    if not dex_mode and slot is None and tries < 25:
+        return False
+    has_slot = inject_sheet_permissions(sheet, snapshot, slot, info)
+    if hide and root is not None:
+        hide_trust_badge(root, snapshot)
+        later(lambda: hide_trust_badge(root), 200)
+    if has_slot and STATE.on:
+        arm_cleanup()
+    return True
+
+
+def build_code_only(ctx, info):
+    from android.view import Gravity
+    from android.widget import LinearLayout
+    from android_utils import OnClickListener
+    dp = dp
+    accent = theme_color("key_dialogTextBlue", -13134875)
+    press = theme_color("key_listSelector", 0x1F808080)
+    outer = LinearLayout(ctx)
+    outer.setOrientation(1)
+    outer.setTag(TAG)
+    outer.setPadding(dp(16), dp(8), dp(16), dp(8))
+    button = label(ctx, tr("view_code"), accent, 15.0, medium=True)
+    button.setGravity(Gravity.CENTER)
+    button.setClickable(True)
+    button.setBackground(ripple((accent & 0x00FFFFFF) | 0x26000000, press, 12))
+    path, name = info["path"], info["name"]
+    button.setOnClickListener(OnClickListener(lambda v: open_code_viewer(path, name)))
+    outer.addView(button, LinearLayout.LayoutParams(-1, dp(46)))
+    return outer
+
+
+def all_subclasses(base):
+    seen, stack, out = set(), [base], []
+    while stack:
+        for sub in stack.pop().__subclasses__():
+            if sub not in seen:
+                seen.add(sub)
+                out.append(sub)
+                stack.append(sub)
+    return out
+
+
+def is_entry(item):
+    if getattr(item, "em_perm", False):
+        return True
+    return type(item).__name__ == "Text" and getattr(item, "text", None) in (
+        TEXTS["en"]["perms_tab"], TEXTS["ru"]["perms_tab"])
+
+
+def module_pid(module):
+    pid = getattr(module, "__id__", None)
+    if isinstance(pid, str):
+        return pid
+    return pid_from_file(getattr(module, "__file__", None))
+
+
+def plugin_pid(inst, hint):
+    pid = getattr(inst, "id", None)
+    if isinstance(pid, str) and pid:
+        return pid
+    if isinstance(hint, str) and hint:
+        return hint
+    try:
+        return module_pid(sys.modules.get(type(inst).__module__))
+    except Exception:
+        return None
+
+
+def plugin_pid_of_class(cls):
+    try:
+        return module_pid(sys.modules.get(cls.__module__))
+    except Exception:
+        return None
+
+
+def perm_items(plugin, pid):
+    current = set(STATE.grants.get(pid) or [])
+
+    def make(perm):
+        def on_change(value):
+            set_grants(pid, toggled(pid, perm, bool(value)))
+        return on_change
+
+    items = [Header(text=tr("perms_tab"))]
+    for perm in PERMS:
+        key = "__em_perm_" + perm.replace(".", "_")
+        try:
+            plugin.set_setting(key, perm in current)
+        except Exception:
+            pass
+        items.append(Switch(key=key, text=tr("perm." + perm) + (" ⚠" if perm in DANGEROUS else ""),
+                            default=perm in current, on_change=make(perm)))
+    return items
+
+
+def perm_entry(plugin, pid):
+    granted = STATE.grants.get(pid)
+    sub = tr("pending") if granted is None else tr("perms_count", len(granted), len(PERMS))
+    item = Text(text=tr("perms_tab"), subtext=sub, icon="msg_permissions",
+                create_sub_fragment=lambda: perm_items(plugin, pid))
+    try:
+        item.em_perm = True
+    except Exception:
+        pass
+    return item
+
+
+def wrap_settings(cls):
+    try:
+        orig = cls.create_settings
+    except AttributeError:
+        return
+    if getattr(orig, "em_wrapped", False) or cls is STATE.self_cls:
+        return
+    hint = getattr(orig, "__globals__", {}).get("__id__")
+
+    def create_settings(self, *a, **k):
+        res = orig(self, *a, **k)
+        try:
+            if not STATE.on:
+                return res
+            pid = plugin_pid(self, hint)
+            if not pid or pid == __id__:
+                return res
+            items = list(res) if res else []
+            if any(is_entry(i) for i in items):
+                return res
+            items.append(Divider())
+            items.append(perm_entry(self, pid))
+            return items
+        except Exception:
+            log("warning", traceback.format_exc())
+            return res
+
+    create_settings.em_wrapped = True
+    try:
+        had = "create_settings" in cls.__dict__
+        setattr(cls, "create_settings", create_settings)
+        STATE.settings_patches.append((cls, had, orig))
+        wrap_class_callbacks(cls, hint or plugin_pid_of_class(cls))
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def hook_plugin_settings():
+    for cls in all_subclasses(BasePlugin):
+        wrap_settings(cls)
+    STATE.settings_scanned = True
+
+
+def install_settings_hooks():
+    STATE.self_cls = type(STATE.plugin)
+    hook_plugin_settings()
+    if STATE.settings_init is not None:
+        return
+    try:
+        orig = BasePlugin.__dict__.get("__init_subclass__")
+
+        def hook(cls, **kw):
+            if orig is not None:
+                orig.__func__(cls, **kw)
+            else:
+                super(BasePlugin, cls).__init_subclass__(**kw)
+            wrap_settings(cls)
+
+        STATE.settings_init = (orig,)
+        BasePlugin.__init_subclass__ = classmethod(hook)
+    except Exception:
+        STATE.settings_init = None
+        log("warning", traceback.format_exc())
+
+
+def remove_settings_hooks():
+    for cls, had, orig in reversed(STATE.settings_patches):
+        try:
+            if had:
+                setattr(cls, "create_settings", orig)
+            else:
+                delattr(cls, "create_settings")
+        except Exception:
+            pass
+    STATE.settings_patches = []
+    STATE.settings_scanned = False
+    if STATE.settings_init is not None:
+        try:
+            if STATE.settings_init[0] is not None:
+                BasePlugin.__init_subclass__ = STATE.settings_init[0]
+            else:
+                del BasePlugin.__init_subclass__
+        except Exception:
+            pass
+        STATE.settings_init = None
+
+
+def ui_context():
+    try:
+        from client_utils import get_last_fragment
+        frag = get_last_fragment()
+        ctx = frag.getContext() if frag else None
+        if ctx is not None:
+            return ctx
+    except Exception:
+        pass
+    from org.telegram.messenger import ApplicationLoader
+    return ApplicationLoader.applicationContext
+
+
+def header_item():
+    from android.view import Gravity
+    from android.widget import LinearLayout
+    ctx = ui_context()
+    layout = LinearLayout(ctx)
+    layout.setOrientation(1)
+    layout.setGravity(Gravity.CENTER)
+    layout.setPadding(dp(16), dp(24), dp(16), dp(16))
+    for text, color_key, color, size, top, bold in (
+            ("exteraMore v" + __version__, "key_windowBackgroundWhiteBlackText", -16777216, 20.0, 12, True),
+            (tr("hdr_desc"), "key_windowBackgroundWhiteGrayText2", -7829368, 13.5, 4, False)):
+        view = label(ctx, text, theme_color(color_key, color), size, bold)
+        view.setGravity(Gravity.CENTER)
+        view.setPadding(0, dp(top), 0, 0)
+        layout.addView(view)
+    try:
+        from org.telegram.ui.Components import UItem
+        item = UItem.asCustom(layout)
+        item.transparent = True
+        return Custom(item=item)
+    except Exception:
+        return Custom(view=layout)
+
+
+def overview_items():
+    infos = plugin_info_snapshot()
+    items = [Header(text=tr("plugins_over"))]
+    if not infos:
+        items.append(Text(text=tr("plugins_none")))
+        return items
+    order = sorted(infos.values(), key=lambda i: (STATE.grants.get(i["id"]) is not None, i["name"].lower()))
+    for info in order:
+        pid = info["id"]
+        items.append(Text(text=info["name"], subtext=status_of(pid),
+                          on_click=lambda v=None, pid=pid: open_plugin_settings(pid)))
+    return items
+
+
+def code_items():
+    infos = plugin_info_snapshot()
+    items = [Header(text=tr("code_viewer"))]
+    if not infos:
+        items.append(Text(text=tr("code_none")))
+        return items
+    order = sorted(infos.values(), key=lambda i: (i.get("kind") != "elyx", i["name"].lower()))
+    for info in order:
+        kind = tr("kind_elyx") if info.get("kind") == "elyx" else tr("kind_single")
+        level = info.get("protection", "open") if info.get("kind") == "elyx" else "open"
+        if level != "open":
+            kind += " · " + tr("prot_" + level)
+        items.append(Text(text=info["name"], subtext=kind,
+                          on_click=lambda v=None, p=info["path"], n=info["name"]: open_code_viewer(p, n)))
+    return items
+
+SUPPORT_USER = "sktrxdev"
+SUPPORT_URL = "https://t.me/" + SUPPORT_USER
+SUPPORT_POINTS = (("msg_stats", "support_p1"), ("msg_gift_premium", "support_p2"))
+
+
+def open_support_channel(ctx):
+    try:
+        from org.telegram.messenger.browser import Browser
+        Browser.openUrl(ctx, SUPPORT_URL)
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def show_support_avatar(image, account, chat):
+    STATE.support_chat = chat
+
+    def display():
+        try:
+            from org.telegram.ui.Components import AvatarDrawable
+            drawable = AvatarDrawable()
+            drawable.setInfo(account, chat)
+            image.setForUserOrChat(chat, drawable)
+        except Exception:
+            log("warning", traceback.format_exc())
+
+    on_ui(display)
+
+
+def support_chat_resolved(controller, image, account, response, error):
+    try:
+        if error or response is None or response.chats.size() == 0:
+            return
+        controller.putChats(response.chats, False)
+        controller.putUsers(response.users, False)
+        show_support_avatar(image, account, response.chats.get(0))
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def load_avatar(image):
+    try:
+        from org.telegram.messenger import MessagesController, UserConfig
+        from client_utils import send_request
+        from org.telegram.tgnet import TLRPC
+
+        account = UserConfig.selectedAccount
+        controller = MessagesController.getInstance(account)
+        chat = STATE.support_chat or controller.getUserOrChat(SUPPORT_USER)
+        if chat is not None:
+            show_support_avatar(image, account, chat)
+            return
+        request = TLRPC.TL_contacts_resolveUsername()
+        request.username = SUPPORT_USER
+        callback = lambda response, error: support_chat_resolved(
+            controller, image, account, response, error)
+        send_request(request, callback)
+    except Exception:
+        log("warning", traceback.format_exc())
+
+
+def support_avatar(ctx, add):
+    from android.graphics.drawable import GradientDrawable
+    from android.view import Gravity
+    from org.telegram.ui.Components import BackupImageView
+
+    image = BackupImageView(ctx)
+    image.setRoundRadius(dp(48))
+    placeholder = GradientDrawable()
+    placeholder.setShape(1)
+    placeholder.setColor(theme_color("key_dialogBackgroundGray", 0x14808080))
+    image.setBackground(placeholder)
+    add(image, 0, dp(96), dp(96), Gravity.CENTER_HORIZONTAL)
+    return image
+
+
+def support_intro(ctx, add, text_color, hint_color):
+    from android.view import Gravity
+
+    title = label(ctx, tr("support_title"), text_color, 22.0, medium=True)
+    title.setGravity(Gravity.CENTER)
+    add(title, 16)
+
+    subtitle = label(ctx, tr("support_sub"), hint_color, 15.0)
+    subtitle.setGravity(Gravity.CENTER)
+    subtitle.setLineSpacing(0.0, 1.15)
+    add(subtitle, 8)
+
+
+def support_points(ctx, add, text_color):
+    from android.widget import LinearLayout
+
+    dp = dp
+    for index, (icon, key) in enumerate(SUPPORT_POINTS):
+        row = LinearLayout(ctx)
+        icon_params = LinearLayout.LayoutParams(dp(26), dp(26))
+        icon_params.setMargins(dp(9), 0, dp(9), 0)
+        row.addView(icon_view(ctx, icon, text_color), icon_params)
+        body = label(ctx, tr(key), text_color, 15.5)
+        body.setLineSpacing(0.0, 1.15)
+        body.setPadding(dp(8), 0, 0, 0)
+        row.addView(body, LinearLayout.LayoutParams(0, -2, 1.0))
+        add(row, 16 if index else 22)
+
+
+def support_button(ctx, add):
+    from android.view import Gravity
+
+    color = theme_color("key_featuredStickers_addButton", -11037236)
+    pressed = theme_color("key_featuredStickers_addButtonPressed", color)
+    button = label(ctx, tr("support_go"),
+                    theme_color("key_featuredStickers_buttonText", -1), 16.0, medium=True)
+    button.setGravity(Gravity.CENTER)
+    button.setClickable(True)
+    button.setBackground(ripple(color, pressed, 14))
+    add(button, 28, -1, dp(52))
+    return button
+
+
+def support_view(ctx):
+    from android.widget import LinearLayout
+
+    dp = dp
+    text_color = theme_color("key_dialogTextBlack", -16777216)
+    hint_color = theme_color("key_dialogTextGray2", -7829368)
+    root = LinearLayout(ctx)
+    root.setOrientation(1)
+    root.setPadding(dp(24), dp(20), dp(24), dp(20))
+
+    def add(view, top=0, width=-1, height=-2, gravity=None):
+        lp = LinearLayout.LayoutParams(width, height)
+        lp.topMargin = dp(top)
+        if gravity is not None:
+            lp.gravity = gravity
+        root.addView(view, lp)
+
+    image = support_avatar(ctx, add)
+    support_intro(ctx, add, text_color, hint_color)
+    support_points(ctx, add, text_color)
+    button = support_button(ctx, add)
+    return root, image, button
+
+
+def show_support():
+    def show():
+        ctx = activity()
+        if ctx is None:
+            return
+        try:
+            from android_utils import OnClickListener
+            from org.telegram.ui.ActionBar import BottomSheet
+            root, image, button = support_view(ctx)
+            builder = BottomSheet.Builder(ctx)
+            builder.setCustomView(root)
+            sheet = builder.show()
+
+            def go(view):
+                safe(sheet.dismiss)
+                open_support_channel(ctx)
+            button.setOnClickListener(OnClickListener(go))
+            load_avatar(image)
+        except Exception:
+            log("warning", traceback.format_exc())
+    on_ui(show)
+
+
+class ExteraMorePlugin(BasePlugin):
+
+    def on_plugin_load(self):
+        STATE.plugin = self
+        STATE.alive = True
+        STATE.dex_bridge = install_dex_bridge()
+        STATE.dex_permissions.clear()
+        STATE.gated.clear()
+        STATE.started.clear()
+        load_grants()
+        STATE.on = bool(self.get_setting("perm_on", True))
+        try:
+            if self.get_setting("cache_imports", True):
+                enable_import_cache()
+            if self.get_setting("lazy_imports", True):
+                enable_lazy()
+            install_gates()
+            install_settings_hooks()
+        except Exception:
+            log("error", traceback.format_exc())
+        threading.Thread(target=self.init_job, name="extera_more-init", daemon=True).start()
+
+    def init_job(self):
+        try:
+            for attempt in range(15):
+                if not STATE.alive:
+                    return
+                time.sleep(0.1)
+            plugins = scan_all()
+            if not STATE.alive:
+                return
+            with STATE.lock:
+                STATE.plugin_infos.update(plugins)
+            if not self.get_setting("migrated", False):
+                migrate(plugins)
+            with STATE.lock:
+                STATE.pending.update(pid for pid in plugins if pid not in STATE.grants)
+            save_scan_cache()
+            if STATE.alive:
+                install_install_hooks(bool(self.get_setting("trust_off", True)))
+            if STATE.alive and self.get_setting("cache_imports", True):
+                warm_imports(plugins)
+        except Exception:
+            log("error", traceback.format_exc())
+
+    def on_plugin_unload(self):
+        STATE.on = False
+        STATE.alive = False
+        if STATE.dex_bridge is not None:
+            try:
+                dex_method(STATE.dex_bridge, "removeHook", 0).invoke(None)
+            except Exception:
+                log("warning", traceback.format_exc())
+        STATE.dex_bridge = None
+        STATE.dex_loader = None
+        STATE.dex_provider = None
+        STATE.dex_permissions.clear()
+        timer, STATE.cleanup_timer = STATE.cleanup_timer, None
+        if timer is not None:
+            timer.cancel()
+        ide, STATE.ide = STATE.ide, None
+        if ide is not None:
+            on_ui(ide.close)
+        with STATE.lock:
+            unhooks, STATE.unhooks = STATE.unhooks, []
+        for unhook in unhooks:
+            try:
+                self.unhook_method(unhook)
+            except Exception:
+                pass
+        remove_gates()
+        unwrap_class_callbacks()
+        remove_settings_hooks()
+        disable_lazy()
+        disable_import_cache()
+        save_scan_cache()
+        STATE.gated.clear()
+        STATE.started.clear()
+        java_classes.clear()
+
+    def on_app_event(self, event_type):
+        if event_type not in (AppEvent.START, AppEvent.RESUME):
+            return
+        with STATE.lock:
+            if STATE.scan_refreshing:
+                return
+            STATE.scan_refreshing = True
+        threading.Thread(
+            target=self.refresh_after_app_event,
+            args=(event_type,),
+            name="extera_more-scan",
+            daemon=True,
+        ).start()
+
+    def refresh_after_app_event(self, event_type):
+        try:
+            if not STATE.alive:
+                return
+            plugins = scan_all(30.0)
+            if not STATE.alive:
+                return
+            with STATE.lock:
+                STATE.plugin_infos.update(plugins)
+                STATE.pending.update(pid for pid in plugins if pid not in STATE.grants)
+            settings_hook_needed = (
+                event_type == AppEvent.START
+                or STATE.settings_init is None
+                or not STATE.settings_scanned
+            )
+            if settings_hook_needed:
+                try:
+                    hook_plugin_settings()
+                except Exception:
+                    log("warning", traceback.format_exc())
+            pending_prompt = STATE.pending - STATE.prompted
+            if STATE.on and pending_prompt and self.get_setting("strict_new", True):
+                on_ui(prompt_pending)
+        except Exception:
+            log("warning", traceback.format_exc())
+        finally:
+            with STATE.lock:
+                STATE.scan_refreshing = False
+
+    def page_perf(self):
+        def on_cache(value):
+            disable_import_cache()
+            if value:
+                enable_import_cache()
+
+        def on_lazy(value):
+            disable_lazy()
+            if value:
+                enable_lazy()
+
+        def on_modules(value):
+            if self.get_setting("lazy_imports", True):
+                disable_lazy()
+                enable_lazy(value)
+
+        return [
+            Header(text=tr("perf")),
+            Switch(key="cache_imports", text=tr("cache_imports"), default=True, on_change=on_cache),
+            Switch(key="lazy_imports", text=tr("lazy_imports"), default=True, on_change=on_lazy),
+            Input(key="lazy_modules", text=tr("lazy_modules"), default=DEFAULT_LAZY, on_change=on_modules),
+        ]
+
+    def page_sec(self):
+        def toggle_runtime(value):
+            STATE.on = bool(value)
+
+        return [
+            Header(text=tr("sec")),
+            Switch(key="perm_on", text=tr("perm_on"), default=True, on_change=toggle_runtime),
+            Switch(key="trust_off", text=tr("trust_off"), default=True),
+            Switch(key="hide_trust_badge", text=tr("hide_trust"), default=True),
+            Switch(key="strict_new", text=tr("strict"), default=True),
+            Switch(key="compat_force", text=tr("compat_force"), default=False),
+        ] + overview_items()
+
+    def create_settings(self):
+        return [
+            header_item(),
+            Text(text=tr("perf"), icon="msg_stats", create_sub_fragment=self.page_perf),
+            Text(text=tr("sec"), icon="msg_secret", create_sub_fragment=self.page_sec),
+            Text(text=tr("code_viewer"), subtext=tr("code_viewer_sub"), icon="msg_info",
+                 create_sub_fragment=code_items),
+            Divider(),
+            Text(text=tr("support"), icon="msg_gift_premium", accent=True,
+                 on_click=lambda view=None: show_support()),
+        ]
