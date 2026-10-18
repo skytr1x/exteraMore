@@ -1,3 +1,19 @@
+"""
+Плагин принадлежит @sktrxdev и
+не создан для продажи.
+
+В случае, если вы берете кодовые решения, либо плагин
+прошу указывать автора.
+
+---
+
+This plugin belongs to @sktrxdev and
+is not intended for commercial sale.
+
+If you use any code snippets or the plugin itself,
+please credit the author.
+"""
+
 __id__ = "extera_more"
 __name__ = "exteraMore"
 __description__ = "Make your client technically better.\n\nThe permission idea comes from the exteraless client."
@@ -34,6 +50,7 @@ import zipfile
 from base_plugin import AppEvent, BasePlugin
 from ui.settings import Custom, Divider, Header, Input, Switch, Text
 
+# translating
 TEXTS = {
     "en": {
         "perf": "Performance",
@@ -215,7 +232,7 @@ TEXTS = {
 
 language_cache = [None, -1e9]
 
-
+# client language detector
 def current_language():
     now = time.monotonic()
     if language_cache[0] is not None and now - language_cache[1] < 10.0:
@@ -278,6 +295,7 @@ SCAN_VERSION = hashlib.sha1(
     repr((MARKERS, PERMS, "open-re", "elyx", "protect", "bounded-source-v2")).encode()
 ).hexdigest()[:8]
 
+# some filters
 METADATA_KEYS = ("__id__", "__name__", "__version__", "__permissions__")
 
 RE_TOP_LEVEL_DEFINITION = re.compile(r"^(?:def |class |async def |@)", re.M)
@@ -365,7 +383,7 @@ def log(level, msg):
         except Exception:
             pass
 
-
+# permission at settings
 def read_setting(key, default=None):
     try:
         return RUNTIME.plugin.get_setting(key, default)
@@ -484,6 +502,7 @@ def save_scan_cache():
         log("warning", traceback.format_exc())
 
 
+# ast meta
 def metadata_from_ast(tree):
     meta = {}
     for node in tree.body:
@@ -584,6 +603,7 @@ def protection_of(*texts):
     return "review"
 
 
+# elyx plugin permission and code read system
 def archive_plugin_info(path, ident, name, sources, protection="review", scan_complete=True):
     src = "\n".join(sources)
     imports = imports_in_source(src)
@@ -1162,6 +1182,7 @@ def settings_gate():
         return wrapper
     return make
 
+# another settings
 CLIENT_GATES = (
     ("hook_method", "hooks"), ("hook_all_methods", "hooks"), ("hook_all_constructors", "hooks"),
     ("add_hook", "messages.read"), ("add_on_send_message_hook", "messages.send"),
@@ -1960,7 +1981,7 @@ LANG_BY_EXT = {
     ".yml": "yaml", ".yaml": "yaml", ".json": "json",
 }
 
-
+# ide ig
 def render_file(node, policy="open"):
     data, cut = node.source.read(node)
     ext = os.path.splitext(node.name)[1].lower()
@@ -2710,7 +2731,7 @@ def hook_install_sheet_classes(names):
         except Exception:
             log("warning", traceback.format_exc())
 
-
+# loading (fixed)
 def show_spinner():
     try:
         ctx = activity()
@@ -3575,7 +3596,7 @@ def inject_sheet_permissions(sheet, view_snapshot, slot, info):
     add_sheet_block(sheet, slot, pid, info, chosen, code_target)
     return True
 
-
+# injection into install_sheet (on release may be fixed badge settings)
 def inject_sheet(sheet, info, tries):
     root = sheet_root(sheet)
     hide = bool(read_setting("hide_trust_badge", True))
@@ -4187,3 +4208,19 @@ class ExteraMorePlugin(BasePlugin):
             Text(text=translate("support"), icon="msg_gift_premium", accent=True,
                  on_click=lambda view=None: show_support()),
         ]
+
+"""
+Плагин принадлежит @sktrxdev и
+не создан для продажи.
+
+В случае, если вы берете кодовые решения, либо плагин
+прошу указывать автора.
+
+---
+
+This plugin belongs to @sktrxdev and
+is not intended for commercial sale.
+
+If you use any code snippets or the plugin itself,
+please credit the author.
+"""
